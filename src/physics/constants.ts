@@ -1,0 +1,10 @@
+export const GAMMA = 1.4;
+export const R_AIR = 287.05;
+export const G = 9.80665;
+export const T_SEA_LEVEL = 288.15;
+export const P_SEA_LEVEL = 101325;
+export const RHO_SEA_LEVEL = 1.225;
+export const MU_SEA_LEVEL = 1.789e-5;
+export const RE_CRIT = 5e5;
+export const RECOVERY_LAMINAR = 0.85;
+export const RECOVERY_TURBULENT = 0.9;

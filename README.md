@@ -36,15 +36,26 @@ Open http://localhost:5173
 
 ## GitHub Pages
 
-Pushes to `main` automatically build and update the `gh-pages` branch via GitHub Actions.
+Pushes to `main` build with base path `/hypersonics-visualiser/` and deploy via GitHub Actions.
 
 1. Push this repo to GitHub.
-2. In the repo: **Settings → Pages → Build and deployment → Branch** → select `gh-pages` / `/ (root)`.
+2. In the repo: **Settings → Pages → Build and deployment → Source** → select **GitHub Actions** (not “Deploy from a branch” and not `main`).
 3. Push to `main` — the [Deploy workflow](.github/workflows/deploy.yml) runs tests, builds, and publishes `dist/`.
 
-The site will be at https://pyastreboff.github.io/hyerpsonics-visualiser/
+The site will be at **https://pyastreboff.github.io/hypersonics-visualiser/**
 
-To deploy manually without waiting for CI: `npm run deploy`
+If you see a blank page, Pages is probably still deploying the `main` branch (which only has source files, not the built app). Switch the source to **GitHub Actions**.
+
+To preview the Pages build locally:
+
+```bash
+npm run build:pages
+npx vite preview --base /hypersonics-visualiser/ --port 4173
+```
+
+Then open http://localhost:4173/hypersonics-visualiser/
+
+To deploy manually: `npm run deploy` (pushes `dist/` to the `gh-pages` branch — only if you use branch-based Pages).
 
 ## Physics limitations
 

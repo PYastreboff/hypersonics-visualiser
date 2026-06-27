@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Hypersonics Visualiser">
+  <rect width="32" height="32" rx="7" fill="#0a0e14"/>
+  <path
+    d="M6 16 L25 4.5v23Z"
+    fill="none"
+    stroke="#ff9933"
+    stroke-width="2"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M11 16 L25 9v14Z"
+    fill="#4a9eff"
+    stroke="#6bb5ff"
+    stroke-width="0.75"
+    stroke-linejoin="round"
+  />
+</svg>

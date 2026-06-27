@@ -31,20 +31,20 @@ Open http://localhost:5173
 | `npm run build:pages` | Production build for GitHub Pages |
 | `npm run preview` | Preview production build |
 | `npm run preview:pages` | Preview the GitHub Pages build locally |
-| `npm run deploy` | Build and push `dist/` to the `gh-pages` branch |
+| `npm run deploy` | Manual deploy to `gh-pages` (optional; CI does this on push) |
 | `npm test` | Run unit tests |
 
 ## GitHub Pages
 
-1. Push `main` to GitHub.
-2. In the repo: **Settings → Pages → Build and deployment → Branch** → select `gh-pages` / `/ (root)`.
-3. Deploy from your machine:
+Pushes to `main` automatically build and update the `gh-pages` branch via GitHub Actions.
 
-```bash
-npm run deploy
-```
+1. Push this repo to GitHub.
+2. In the repo: **Settings → Pages → Build and deployment → Branch** → select `gh-pages` / `/ (root)`.
+3. Push to `main` — the [Deploy workflow](.github/workflows/deploy.yml) runs tests, builds, and publishes `dist/`.
 
 The site will be at https://pyastreboff.github.io/hyerpsonics-visualiser/
+
+To deploy manually without waiting for CI: `npm run deploy`
 
 ## Physics limitations
 

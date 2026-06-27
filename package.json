@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:pages": "VITE_BASE_PATH=/hyerpsonics-visualiser/ npm run build",
     "preview": "vite preview",
+    "preview:pages": "npm run build:pages && vite preview",
+    "deploy": "npm run build:pages && gh-pages -d dist --dotfiles",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -20,10 +23,12 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@types/node": "^26.0.1",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@types/three": "^0.175.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "gh-pages": "^6.3.0",
     "typescript": "~5.7.2",
     "vite": "^6.2.0",
     "vitest": "^3.0.8"

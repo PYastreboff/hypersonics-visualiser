@@ -10,7 +10,7 @@ self.onmessage = (e: MessageEvent) => {
 
   if (e.data.type === 'run') {
     cancelled = false;
-    const { nx, ny, windSpeed, renderStep, playbackSeconds, obstacle } = e.data;
+    const { nx, ny, windSpeed, fluidDensity, renderStep, playbackSeconds, obstacle } = e.data;
 
     try {
       const result = prerenderLbm(
@@ -18,6 +18,7 @@ self.onmessage = (e: MessageEvent) => {
           nx,
           ny,
           windSpeed,
+          fluidDensity,
           renderStep,
           playbackSeconds,
           obstacle: new Uint8Array(obstacle),

@@ -42,11 +42,14 @@ export interface LbmConfig {
 export class LbmSolver {
   readonly nx: number;
   readonly ny: number;
-  readonly windSpeed: number;
+  windSpeed: number;
   readonly tau: number;
-  readonly rho0: number;
+  rho0: number;
   readonly obstacle: Uint8Array;
   readonly F: Float64Array[];
+  private readonly displayUx: Float64Array;
+  private readonly displayUy: Float64Array;
+  private readonly displayRho: Float64Array;
 
   constructor(config: LbmConfig, obstacle: Uint8Array) {
     this.nx = config.nx;
@@ -55,16 +58,65 @@ export class LbmSolver {
     this.tau = config.tau ?? 0.6;
     this.rho0 = config.rho0 ?? 1.0;
     this.obstacle = obstacle;
+    const size = config.nx * config.ny;
+    this.displayUx = new Float64Array(size);
+    this.displayUy = new Float64Array(size);
+    this.displayRho = new Float64Array(size);
     this.F = Array.from({ length: 9 }, (_, i) => {
-      const arr = new Float64Array(config.nx * config.ny);
+      const arr = new Float64Array(size);
       arr.fill(W[i] * this.rho0);
       return arr;
     });
+    this.seedDisplayState();
+  }
+
+  private seedDisplayState(): void {
+    const { windSpeed, rho0, obstacle, displayUx } = this;
+    for (let idx = 0; idx < displayUx.length; idx++) {
+      if (obstacle[idx]) {
+        this.displayUx[idx] = 0;
+        this.displayUy[idx] = 0;
+        this.displayRho[idx] = rho0;
+        continue;
+      }
+      this.displayUx[idx] = windSpeed;
+      this.displayUy[idx] = 0;
+      this.displayRho[idx] = rho0;
+    }
   }
 
   updateObstacle(mask: Uint8Array): void {
     if (mask.length !== this.obstacle.length) return;
     this.obstacle.set(mask);
+  }
+
+  /** Change reference density in-place — scales distributions to preserve velocity. */
+  updateFluidDensity(rho0: number): void {
+    if (rho0 <= 0 || !Number.isFinite(rho0)) return;
+    const ratio = rho0 / this.rho0;
+    if (Math.abs(ratio - 1) < 1e-12) return;
+    this.rho0 = rho0;
+    for (let i = 0; i < 9; i++) {
+      const fi = this.F[i];
+      for (let idx = 0; idx < fi.length; idx++) {
+        fi[idx] *= ratio;
+      }
+    }
+    for (let idx = 0; idx < this.displayRho.length; idx++) {
+      if (!this.obstacle[idx]) {
+        this.displayRho[idx] = rho0;
+      }
+    }
+  }
+
+  updateWindSpeed(speed: number): void {
+    if (!Number.isFinite(speed) || speed <= 0) return;
+    this.windSpeed = speed;
+    for (let idx = 0; idx < this.displayUx.length; idx++) {
+      if (!this.obstacle[idx]) {
+        this.displayUx[idx] = speed;
+      }
+    }
   }
 
   step(): void {
@@ -108,6 +160,10 @@ export class LbmSolver {
       rho[idx] = rho0;
     }
 
+    this.displayUx.set(ux);
+    this.displayUy.set(uy);
+    this.displayRho.set(rho);
+
     const invTau = 1 / tau;
     for (let i = 0; i < 9; i++) {
       const [vx, vy] = VEL[i];
@@ -119,8 +175,16 @@ export class LbmSolver {
         F[i][idx] += -invTau * (F[i][idx] - feq);
       }
     }
+
+    for (let idx = 0; idx < size; idx++) {
+      if (obstacle[idx]) {
+        this.displayUx[idx] = 0;
+        this.displayUy[idx] = 0;
+      }
+    }
   }
 
+  /** Post-collision state from distributions. */
   getMacroscopic(): { ux: Float64Array; uy: Float64Array; rho: Float64Array } {
     const { F } = this;
     const size = this.nx * this.ny;
@@ -150,8 +214,17 @@ export class LbmSolver {
     return { ux, uy, rho };
   }
 
+  /** gem.py display snapshot — pre-collision macroscopic with inlet BC. */
+  getDisplayMacroscopic(): { ux: Float64Array; uy: Float64Array; rho: Float64Array } {
+    return {
+      ux: this.displayUx,
+      uy: this.displayUy,
+      rho: this.displayRho,
+    };
+  }
+
   getMetric(displayMode: 'velocity' | 'pressure'): Float32Array {
-    const { ux, uy, rho } = this.getMacroscopic();
+    const { ux, uy, rho } = this.getDisplayMacroscopic();
     const metric = new Float32Array(ux.length);
     if (displayMode === 'velocity') {
       for (let i = 0; i < metric.length; i++) {

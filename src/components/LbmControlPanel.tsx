@@ -9,11 +9,14 @@ import {
   lbmGridSize,
   lbmResolutionLabel,
   formatLbmSpeedMs,
+  formatLbmFluidDensity,
+  LBM_MIN_FLUID_DENSITY,
+  LBM_MAX_FLUID_DENSITY,
+  LBM_FLUID_DENSITY_STEP,
 } from '@/physics/lbmConfig';
+import { nextLbmShapeId } from '@/physics/lbmObstacles';
 import { SettingLabel } from './SettingLabel';
 import { NumInput } from './NumInput';
-
-let lbmShapeId = 100;
 
 function NumField({
   label,
@@ -56,6 +59,7 @@ function ShapeCard({
   onHover: (hovered: boolean) => void;
 }) {
   const setType = (type: LbmShapeType) => {
+    if (type === 'custom') return;
     const next: LbmShapeInput = { ...shape, type };
     if (type === 'airfoil') {
       next.chord = shape.chord ?? 80;
@@ -66,6 +70,10 @@ function ShapeCard({
     } else {
       next.radius = shape.radius ?? 12;
     }
+    delete next.name;
+    delete next.customScale;
+    delete next.stencilX;
+    delete next.stencilY;
     onChange(next);
   };
 
@@ -82,17 +90,28 @@ function ShapeCard({
       onMouseLeave={() => onHover(false)}
     >
       <div className="lbm-shape-card-header">
-        <strong>Shape {index + 1}</strong>
+        <strong>
+          {shape.type === 'custom' && shape.name ? shape.name : `Shape ${index + 1}`}
+        </strong>
         <button type="button" className="remove-btn" onClick={onRemove} title="Remove shape">
           ×
         </button>
       </div>
 
       <SettingLabel label="Shape type" tip="Geometry of this obstacle">
-        <select value={shape.type} onChange={(e) => setType(e.target.value as LbmShapeType)}>
+        <select
+          value={shape.type}
+          onChange={(e) => setType(e.target.value as LbmShapeType)}
+          disabled={shape.type === 'custom'}
+        >
           <option value="airfoil">Airfoil</option>
           <option value="square">Square</option>
           <option value="circle">Circle</option>
+          {shape.type === 'custom' && (
+            <option value="custom">
+              {shape.customSource === 'drawn' ? 'Drawn' : 'Custom'}
+            </option>
+          )}
         </select>
       </SettingLabel>
 
@@ -160,6 +179,26 @@ function ShapeCard({
           min={1}
         />
       )}
+
+      {shape.type === 'custom' && (
+        <>
+          <p className="lbm-custom-shape-note">
+            {shape.customSource === 'drawn'
+              ? 'Painted on the canvas — drag to reposition.'
+              : 'Custom obstacle projected onto the 2D tunnel plane.'}
+          </p>
+          {shape.customSource !== 'drawn' && (
+            <NumField
+              label="Size scale"
+              value={shape.customScale ?? 1}
+              onChange={(customScale) => onChange({ ...shape, customScale })}
+              min={0.25}
+              max={4}
+              step={0.05}
+            />
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -167,6 +206,7 @@ function ShapeCard({
 export function LbmControlPanel() {
   const {
     lbmWindSpeed,
+    lbmFluidDensity,
     lbmShapes,
     lbmPlaybackSeconds,
     lbmDisplayMode,
@@ -176,9 +216,13 @@ export function LbmControlPanel() {
     lbmPlaying,
     lbmRunMode,
     lbmPrerenderStatus,
+    lbmInteractionMode,
+    lbmBrushRadius,
+    lbmDrawDensity,
     selectedLbmShapeId,
     hoveredLbmShapeId,
     setLbmWindSpeed,
+    setLbmFluidDensity,
     setLbmPlaybackSeconds,
     setLbmDisplayMode,
     setLbmResolutionScale,
@@ -191,13 +235,16 @@ export function LbmControlPanel() {
     toggleLbmPlaying,
     resetLbmSimulation,
     setHoveredLbmShapeId,
+    setLbmInteractionMode,
+    setLbmBrushRadius,
+    setLbmDrawDensity,
   } = useSimStore();
 
   const effectiveGrid = lbmGridSize(lbmTunnelNx, lbmTunnelNy, lbmResolutionScale);
 
   const addShape = () => {
     addLbmShape({
-      id: `lbm-${++lbmShapeId}`,
+      id: nextLbmShapeId(),
       type: 'square',
       cx: 150,
       cy: 50,
@@ -238,6 +285,41 @@ export function LbmControlPanel() {
             <option value="velocity">Velocity</option>
             <option value="pressure">Pressure</option>
           </select>
+        </SettingLabel>
+
+        <SettingLabel
+          label="Fluid density (ρ₀)"
+          tip="Lattice reference density (not kg/m³). Best accuracy at 1.0. Stable range ~0.1–2.5 for this solver; changes apply live without restarting."
+        >
+          <div className="lbm-brush-size">
+            <button
+              type="button"
+              className="shape-btn lbm-brush-step"
+              onClick={() => setLbmFluidDensity(lbmFluidDensity - LBM_FLUID_DENSITY_STEP)}
+              disabled={lbmFluidDensity <= LBM_MIN_FLUID_DENSITY}
+              aria-label="Decrease fluid density"
+            >
+              −
+            </button>
+            <input
+              type="range"
+              min={LBM_MIN_FLUID_DENSITY}
+              max={LBM_MAX_FLUID_DENSITY}
+              step={LBM_FLUID_DENSITY_STEP}
+              value={lbmFluidDensity}
+              onChange={(e) => setLbmFluidDensity(parseFloat(e.target.value))}
+            />
+            <button
+              type="button"
+              className="shape-btn lbm-brush-step"
+              onClick={() => setLbmFluidDensity(lbmFluidDensity + LBM_FLUID_DENSITY_STEP)}
+              disabled={lbmFluidDensity >= LBM_MAX_FLUID_DENSITY}
+              aria-label="Increase fluid density"
+            >
+              +
+            </button>
+            <span className="value">{formatLbmFluidDensity(lbmFluidDensity)}</span>
+          </div>
         </SettingLabel>
 
         {lbmRunMode === 'prerender' && (
@@ -337,6 +419,86 @@ export function LbmControlPanel() {
             + Add shape
           </button>
         </div>
+
+        <SettingLabel
+          label="Canvas tool"
+          tip="Move existing obstacles, or draw new ones directly on the flow field"
+        >
+          <div className="mode-toggle">
+            <button
+              type="button"
+              className={lbmInteractionMode === 'select' ? 'active' : ''}
+              onClick={() => setLbmInteractionMode('select')}
+            >
+              Move
+            </button>
+            <button
+              type="button"
+              className={lbmInteractionMode === 'draw' ? 'active' : ''}
+              onClick={() => setLbmInteractionMode('draw')}
+            >
+              Draw
+            </button>
+          </div>
+        </SettingLabel>
+
+        {lbmInteractionMode === 'draw' && (
+          <>
+            <SettingLabel
+              label="Density"
+              tip="Increase adds obstacle cells; decrease erases them"
+            >
+              <div className="mode-toggle">
+                <button
+                  type="button"
+                  className={lbmDrawDensity === 'increase' ? 'active' : ''}
+                  onClick={() => setLbmDrawDensity('increase')}
+                >
+                  Increase
+                </button>
+                <button
+                  type="button"
+                  className={lbmDrawDensity === 'decrease' ? 'active' : ''}
+                  onClick={() => setLbmDrawDensity('decrease')}
+                >
+                  Decrease
+                </button>
+              </div>
+            </SettingLabel>
+
+            <SettingLabel label="Brush size" tip="Radius of the brush in grid cells">
+              <div className="lbm-brush-size">
+                <button
+                  type="button"
+                  className="shape-btn lbm-brush-step"
+                  onClick={() => setLbmBrushRadius(lbmBrushRadius - 1)}
+                  disabled={lbmBrushRadius <= 1}
+                  aria-label="Decrease brush size"
+                >
+                  −
+                </button>
+                <input
+                  type="range"
+                  min={1}
+                  max={8}
+                  step={1}
+                  value={lbmBrushRadius}
+                  onChange={(e) => setLbmBrushRadius(parseInt(e.target.value, 10))}
+                />
+                <button
+                  type="button"
+                  className="shape-btn lbm-brush-step"
+                  onClick={() => setLbmBrushRadius(lbmBrushRadius + 1)}
+                  disabled={lbmBrushRadius >= 8}
+                  aria-label="Increase brush size"
+                >
+                  +
+                </button>
+                <span className="value">{lbmBrushRadius} cells</span>
+              </div>
+            </SettingLabel>
+          </>
+        )}
 
         {lbmShapes.map((shape, index) => (
           <ShapeCard

@@ -4,6 +4,8 @@ import type {
   FlowParams,
   HFRunState,
   LbmDisplayMode,
+  LbmDrawDensity,
+  LbmInteractionMode,
   LbmPrerenderStatus,
   LbmRunMode,
   LbmShapeInput,
@@ -16,7 +18,12 @@ import type {
 import { getShapeDefinition } from '@/shapes/definitions';
 import { computeAllMetrics } from '@/physics/drag';
 import { defaultLbmShapes } from '@/physics/lbmObstacles';
-import { lbmFrameToTime, clampTunnelNx, clampTunnelNy, snapLbmResolutionScale } from '@/physics/lbmConfig';
+import {
+  removeBrushFromStencilSet,
+  stencilArraysFromKeys,
+  stencilKeysFromShape,
+} from '@/physics/lbmDrawBrush';
+import { lbmFrameToTime, lbmTotalFrames, clampLbmFluidDensity, clampTunnelNx, clampTunnelNy, snapLbmResolutionScale } from '@/physics/lbmConfig';
 
 let shapeIdCounter = 0;
 
@@ -60,6 +67,7 @@ interface SimState {
   hfWorker: Worker | null;
   lbmDisplayMode: LbmDisplayMode;
   lbmWindSpeed: number;
+  lbmFluidDensity: number;
   lbmResolutionScale: number;
   lbmTunnelNx: number;
   lbmTunnelNy: number;
@@ -75,6 +83,9 @@ interface SimState {
   lbmPrerenderStatus: LbmPrerenderStatus;
   lbmPrerenderProgress: number;
   lbmRewind: number;
+  lbmInteractionMode: LbmInteractionMode;
+  lbmBrushRadius: number;
+  lbmDrawDensity: LbmDrawDensity;
 
   setFlowParam: <K extends keyof FlowParams>(key: K, value: FlowParams[K]) => void;
   addShape: (kind: ShapeKind) => void;
@@ -100,14 +111,18 @@ interface SimState {
   toggleBoundaryLayer: () => void;
   setLbmDisplayMode: (mode: LbmDisplayMode) => void;
   setLbmWindSpeed: (speed: number) => void;
+  setLbmFluidDensity: (density: number) => void;
   setLbmResolutionScale: (scale: number) => void;
   setLbmTunnelNx: (nx: number) => void;
   setLbmTunnelNy: (ny: number) => void;
   setLbmPlaybackSeconds: (seconds: number) => void;
   setLbmElapsedSec: (seconds: number) => void;
   setLbmFrameIndex: (frame: number) => void;
+  seekLbmFrame: (frame: number) => void;
   updateLbmShape: (id: string, shape: LbmShapeInput) => void;
   updateLbmShapePosition: (id: string, cx: number, cy: number) => void;
+  updateLbmShapeStencil: (id: string, stencilX: number[], stencilY: number[]) => void;
+  applyLbmEraseBrush: (lx: number, ly: number, radius: number) => void;
   commitLbmShapeLayout: () => void;
   setSelectedLbmShapeId: (id: string | null) => void;
   setHoveredLbmShapeId: (id: string | null) => void;
@@ -122,6 +137,9 @@ interface SimState {
   ) => void;
   setLbmPlaying: (playing: boolean) => void;
   toggleLbmPlaying: () => void;
+  setLbmInteractionMode: (mode: LbmInteractionMode) => void;
+  setLbmBrushRadius: (radius: number) => void;
+  setLbmDrawDensity: (density: LbmDrawDensity) => void;
   resetLbmSimulation: () => void;
   runHighFidelity: () => void;
   cancelHighFidelity: () => void;
@@ -146,6 +164,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   hfWorker: null,
   lbmDisplayMode: 'velocity',
   lbmWindSpeed: 0.13,
+  lbmFluidDensity: 1,
   lbmResolutionScale: 1,
   lbmTunnelNx: 300,
   lbmTunnelNy: 100,
@@ -161,6 +180,9 @@ export const useSimStore = create<SimState>((set, get) => ({
   lbmPrerenderStatus: 'idle',
   lbmPrerenderProgress: 0,
   lbmRewind: 0,
+  lbmInteractionMode: 'select',
+  lbmBrushRadius: 2,
+  lbmDrawDensity: 'increase',
 
   setFlowParam: (key, value) => {
     set((s) => {
@@ -260,10 +282,9 @@ export const useSimStore = create<SimState>((set, get) => ({
   toggleBoundaryLayer: () => set((s) => ({ showBoundaryLayer: !s.showBoundaryLayer })),
   setLbmDisplayMode: (mode) => set({ lbmDisplayMode: mode }),
   setLbmWindSpeed: (speed) =>
-    set({
-      lbmWindSpeed: Math.min(0.15, Math.max(0.05, speed)),
-      lbmPrerenderStatus: get().lbmRunMode === 'prerender' ? 'idle' : get().lbmPrerenderStatus,
-    }),
+    set({ lbmWindSpeed: Math.min(0.15, Math.max(0.05, speed)) }),
+  setLbmFluidDensity: (density) =>
+    set({ lbmFluidDensity: clampLbmFluidDensity(density) }),
   setLbmResolutionScale: (scale) => {
     set({
       lbmResolutionScale: snapLbmResolutionScale(scale),
@@ -290,6 +311,16 @@ export const useSimStore = create<SimState>((set, get) => ({
   setLbmElapsedSec: (seconds) => set({ lbmElapsedSec: seconds }),
   setLbmFrameIndex: (frame) =>
     set({ lbmFrameIndex: frame, lbmElapsedSec: lbmFrameToTime(frame) }),
+  seekLbmFrame: (frame) =>
+    set((s) => {
+      const maxFrame = Math.max(0, lbmTotalFrames(s.lbmPlaybackSeconds) - 1);
+      const clamped = Math.min(maxFrame, Math.max(0, Math.round(frame)));
+      return {
+        lbmPlaying: false,
+        lbmFrameIndex: clamped,
+        lbmElapsedSec: lbmFrameToTime(clamped),
+      };
+    }),
   updateLbmShape: (id, shape) =>
     set((s) => ({
       lbmShapes: s.lbmShapes.map((sh) => (sh.id === id ? shape : sh)),
@@ -301,6 +332,36 @@ export const useSimStore = create<SimState>((set, get) => ({
         sh.id === id ? { ...sh, cx: Math.round(cx), cy: Math.round(cy) } : sh,
       ),
     })),
+  updateLbmShapeStencil: (id, stencilX, stencilY) =>
+    set((s) => ({
+      lbmShapes: s.lbmShapes.map((sh) =>
+        sh.id === id ? { ...sh, stencilX, stencilY } : sh,
+      ),
+    })),
+  applyLbmEraseBrush: (lx, ly, radius) =>
+    set((s) => {
+      const nextShapes: LbmShapeInput[] = [];
+      let selectedLbmShapeId = s.selectedLbmShapeId;
+
+      for (const shape of s.lbmShapes) {
+        if (shape.type !== 'custom' || !shape.stencilX?.length || !shape.stencilY?.length) {
+          nextShapes.push(shape);
+          continue;
+        }
+
+        const keys = stencilKeysFromShape(shape);
+        removeBrushFromStencilSet(keys, shape.cx, shape.cy, lx, ly, radius);
+        if (keys.size === 0) {
+          if (selectedLbmShapeId === shape.id) selectedLbmShapeId = null;
+          continue;
+        }
+
+        const { stencilX, stencilY } = stencilArraysFromKeys(keys);
+        nextShapes.push({ ...shape, stencilX, stencilY });
+      }
+
+      return { lbmShapes: nextShapes, selectedLbmShapeId };
+    }),
   commitLbmShapeLayout: () =>
     set((s) => ({
       lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
@@ -332,6 +393,10 @@ export const useSimStore = create<SimState>((set, get) => ({
     })),
   toggleLbmPlaying: () => set((s) => ({ lbmPlaying: !s.lbmPlaying })),
   setLbmPlaying: (playing) => set({ lbmPlaying: playing }),
+  setLbmInteractionMode: (mode) => set({ lbmInteractionMode: mode }),
+  setLbmBrushRadius: (radius) =>
+    set({ lbmBrushRadius: Math.min(8, Math.max(1, Math.round(radius))) }),
+  setLbmDrawDensity: (density) => set({ lbmDrawDensity: density }),
   resetLbmSimulation: () =>
     set((s) => {
       if (s.lbmRunMode === 'prerender' && s.lbmPrerenderStatus === 'ready') {

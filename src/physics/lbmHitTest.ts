@@ -29,6 +29,17 @@ function pointInSpec(gx: number, gy: number, spec: LbmShapeSpec): boolean {
     return xRot * xRot + yRot * yRot <= r * r;
   }
 
+  if (spec.type === 'custom') {
+    const stencilX = spec.stencilX;
+    const stencilY = spec.stencilY;
+    if (!stencilX?.length || !stencilY?.length) return false;
+    const ix = Math.round(xRot);
+    const iy = Math.round(yRot);
+    for (let i = 0; i < stencilX.length; i++) {
+      if (stencilX[i] === ix && stencilY[i] === iy) return true;
+    }
+  }
+
   return false;
 }
 
@@ -45,7 +56,7 @@ export function findShapeAtGrid(
     const shape = shapes[i];
     const [spec] = scaleShapeSpecs([lbmInputToSpec(shape)], resolutionScale);
 
-    if (spec.type === 'airfoil') {
+    if (spec.type === 'airfoil' || spec.type === 'custom') {
       const mask = buildObstacleMask(nx, ny, [spec]);
       if (mask[gx * ny + gy]) return shape;
       continue;
@@ -92,4 +103,42 @@ export function screenToGrid(
   const gy = Math.min(ny - 1, Math.max(0, Math.floor((1 - v) * ny)));
 
   return { gx, gy };
+}
+
+export function brushScreenCircle(
+  clientX: number,
+  clientY: number,
+  canvas: HTMLCanvasElement,
+  nx: number,
+  ny: number,
+  brushRadius: number,
+  resolutionScale: number,
+  fitDrawRect: (
+    w: number,
+    h: number,
+    aspect: number,
+  ) => { x: number; y: number; w: number; h: number },
+): { cx: number; cy: number; r: number } | null {
+  const bounds = canvas.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) return null;
+
+  const scaleX = canvas.width / bounds.width;
+  const scaleY = canvas.height / bounds.height;
+  const px = (clientX - bounds.left) * scaleX;
+  const py = (clientY - bounds.top) * scaleY;
+
+  const draw = fitDrawRect(canvas.width, canvas.height, nx / ny);
+  if (
+    px < draw.x ||
+    px > draw.x + draw.w ||
+    py < draw.y ||
+    py > draw.y + draw.h
+  ) {
+    return null;
+  }
+
+  const cellSize = draw.w / nx;
+  const r = Math.max(0, Math.round(brushRadius)) * resolutionScale * cellSize;
+
+  return { cx: px, cy: py, r };
 }

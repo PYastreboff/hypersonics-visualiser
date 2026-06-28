@@ -65,7 +65,32 @@ export function formatLbmLegendValue(
 
 export function lbmLegendUnitLabel(displayMode: 'velocity' | 'pressure'): string {
   if (displayMode === 'velocity') return 'm/s — low to high';
-  return 'Lattice pressure — low to high';
+  return 'Lattice pressure — low (blue) to high (red)';
+}
+
+/**
+ * Lattice reference density ρ₀ (dimensionless), not SI kg/m³.
+ * gem.py uses 1.0. Accuracy is best near 1; bounds below are a stability envelope
+ * for this D2Q9 BGK scheme (τ = 0.6, u ≤ 0.15): distributions must stay positive.
+ * There is no single theoretical maximum — only positivity of fᵢ and small Ma.
+ */
+export const LBM_DEFAULT_FLUID_DENSITY = 1;
+/** Hard lower bound: ρ₀ must be > 0 (LBM cannot represent negative density). */
+export const LBM_MIN_FLUID_DENSITY = 0.1;
+/** Practical upper bound before feq can go negative at u = 0.15, τ = 0.6. */
+export const LBM_MAX_FLUID_DENSITY = 2.5;
+export const LBM_FLUID_DENSITY_STEP = 0.05;
+
+export function clampLbmFluidDensity(density: number): number {
+  const stepped = Math.round(density / LBM_FLUID_DENSITY_STEP) * LBM_FLUID_DENSITY_STEP;
+  return Math.min(
+    LBM_MAX_FLUID_DENSITY,
+    Math.max(LBM_MIN_FLUID_DENSITY, Math.round(stepped * 100) / 100),
+  );
+}
+
+export function formatLbmFluidDensity(density: number): string {
+  return density.toFixed(2);
 }
 
 export function snapLbmResolutionScale(scale: number): LbmResolutionScale {

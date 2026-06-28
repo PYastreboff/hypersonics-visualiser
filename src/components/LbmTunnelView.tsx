@@ -4,15 +4,21 @@ import { LbmSolver } from '@/physics/lbmSolver';
 import {
   buildObstacleMask,
   lbmInputToSpec,
+  nextLbmShapeId,
   scaleShapeSpecs,
 } from '@/physics/lbmObstacles';
-import { findShapeAtGrid, screenToGrid } from '@/physics/lbmHitTest';
+import { findShapeAtGrid, screenToGrid, brushScreenCircle } from '@/physics/lbmHitTest';
+import {
+  addBrushToStencilSet,
+  stencilArraysFromKeys,
+  strokeLogicalPoints,
+} from '@/physics/lbmDrawBrush';
 import { lbmGridSize, lbmTotalFrames, LBM_FRAME_MS, lbmDisplayModeLabel, lbmRunModeLabel } from '@/physics/lbmConfig';
 import {
   getPrerenderFrame,
   type LbmPrerenderResult,
 } from '@/physics/lbmPrerender';
-import { jetColor, metricRange } from '@/visualization/jetColormap';
+import { lbmMetricColor, metricRange } from '@/visualization/jetColormap';
 import { LbmColorLegend } from './LbmColorLegend';
 
 function fitDrawRect(
@@ -45,13 +51,15 @@ function renderFrame(
   containerW: number,
   containerH: number,
   offscreen: HTMLCanvasElement,
+  fluidDensity = 1,
   highlightMask: Uint8Array | null = null,
 ): void {
-  const { vmin, vmax } = metricRange(displayMode, windSpeed);
+  const { vmin, vmax } = metricRange(displayMode, windSpeed, fluidDensity);
   const range = Math.max(vmax - vmin, 1e-9);
   const image = offscreen.getContext('2d')!.createImageData(nx, ny);
-  const gray = Math.round(0.75 * 255);
-  const highlightGray = Math.round(0.88 * 255);
+  const isPressure = displayMode === 'pressure';
+  const gray = Math.round((isPressure ? 0.38 : 0.75) * 255);
+  const highlightGray = Math.round((isPressure ? 0.52 : 0.88) * 255);
 
   for (let x = 0; x < nx; x++) {
     for (let y = 0; y < ny; y++) {
@@ -75,7 +83,7 @@ function renderFrame(
       }
 
       const t = (metric[idx] - vmin) / range;
-      const [r, g, b] = jetColor(t);
+      const [r, g, b] = lbmMetricColor(displayMode, t);
       image.data[out] = r;
       image.data[out + 1] = g;
       image.data[out + 2] = b;
@@ -110,6 +118,16 @@ export function LbmTunnelView() {
     origCy: number;
     wasPlaying: boolean;
   } | null>(null);
+  const drawRef = useRef<{
+    mode: 'increase' | 'decrease';
+    shapeId?: string;
+    cx?: number;
+    cy?: number;
+    stencilKeys?: Set<string>;
+    lastLx: number;
+    lastLy: number;
+    wasPlaying: boolean;
+  } | null>(null);
   const frameRef = useRef(0);
   const rafRef = useRef<number>(0);
   const lastTickRef = useRef(0);
@@ -119,6 +137,7 @@ export function LbmTunnelView() {
     lbmShapes,
     lbmDisplayMode,
     lbmWindSpeed,
+    lbmFluidDensity,
     lbmResolutionScale,
     lbmTunnelNx,
     lbmTunnelNy,
@@ -130,7 +149,9 @@ export function LbmTunnelView() {
     lbmPrerenderStatus,
     lbmPrerenderProgress,
     lbmElapsedSec,
+    lbmFrameIndex,
     setLbmFrameIndex,
+    seekLbmFrame,
     setLbmPrerenderState,
     setLbmPlaying,
     updateLbmShapePosition,
@@ -138,9 +159,22 @@ export function LbmTunnelView() {
     setSelectedLbmShapeId,
     hoveredLbmShapeId,
     setHoveredLbmShapeId,
+    lbmInteractionMode,
+    lbmBrushRadius,
+    lbmDrawDensity,
+    addLbmShape,
+    updateLbmShapeStencil,
+    applyLbmEraseBrush,
   } = useSimStore();
 
   const [isDragging, setIsDragging] = useState(false);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [brushPreview, setBrushPreview] = useState<{
+    cx: number;
+    cy: number;
+    r: number;
+  } | null>(null);
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
 
   const { nx, ny, renderStep } = lbmGridSize(lbmTunnelNx, lbmTunnelNy, lbmResolutionScale);
   const totalFrames = lbmTotalFrames(lbmPlaybackSeconds);
@@ -184,6 +218,8 @@ export function LbmTunnelView() {
       const ctx = canvas?.getContext('2d');
       if (!canvas || !obstacle || !ctx) return;
 
+      const { lbmDisplayMode, lbmWindSpeed, lbmFluidDensity } = useSimStore.getState();
+
       renderFrame(
         ctx,
         metric,
@@ -195,23 +231,37 @@ export function LbmTunnelView() {
         canvas.width,
         canvas.height,
         getOffscreen(),
+        lbmFluidDensity,
         hoverMaskRef.current,
       );
     },
-    [lbmDisplayMode, lbmWindSpeed, nx, ny, getOffscreen],
+    [nx, ny, getOffscreen],
   );
 
+  const paintMetricRef = useRef(paintMetric);
+  paintMetricRef.current = paintMetric;
+
   const paintCurrent = useCallback(() => {
+    const { lbmRunMode, lbmDisplayMode, lbmFluidDensity, lbmWindSpeed } = useSimStore.getState();
     if (lbmRunMode === 'prerender' && prerenderRef.current) {
       paintMetric(
-        getPrerenderFrame(prerenderRef.current, frameRef.current, lbmDisplayMode),
+        getPrerenderFrame(
+          prerenderRef.current,
+          frameRef.current,
+          lbmDisplayMode,
+          lbmFluidDensity,
+          lbmWindSpeed,
+        ),
       );
       return;
     }
     const solver = solverRef.current;
     if (!solver) return;
     paintMetric(solver.getMetric(lbmDisplayMode));
-  }, [lbmRunMode, lbmDisplayMode, paintMetric]);
+  }, [paintMetric]);
+
+  const paintCurrentRef = useRef(paintCurrent);
+  paintCurrentRef.current = paintCurrent;
 
   const rebuildObstacleVisual = useCallback(() => {
     const shapes = useSimStore.getState().lbmShapes;
@@ -239,11 +289,19 @@ export function LbmTunnelView() {
     );
     const obstacle = buildObstacleMask(nx, ny, specs);
     obstacleRef.current = obstacle;
-    solverRef.current = new LbmSolver({ nx, ny, windSpeed: lbmWindSpeed }, obstacle);
+    solverRef.current = new LbmSolver(
+      {
+        nx,
+        ny,
+        windSpeed: useSimStore.getState().lbmWindSpeed,
+        rho0: useSimStore.getState().lbmFluidDensity,
+      },
+      obstacle,
+    );
     frameRef.current = 0;
     setLbmFrameIndex(0);
-    paintMetric(solverRef.current.getMetric(lbmDisplayMode));
-  }, [nx, ny, lbmResolutionScale, lbmWindSpeed, lbmDisplayMode, paintMetric, setLbmFrameIndex]);
+    paintMetric(solverRef.current.getMetric(useSimStore.getState().lbmDisplayMode));
+  }, [nx, ny, lbmResolutionScale, paintMetric, setLbmFrameIndex]);
 
   const cancelPrerender = useCallback(() => {
     if (prerenderWorkerRef.current) {
@@ -283,13 +341,21 @@ export function LbmTunnelView() {
           totalFrames: data.totalFrames,
           nx: data.nx,
           ny: data.ny,
+          fluidDensity: useSimStore.getState().lbmFluidDensity,
+          windSpeed: useSimStore.getState().lbmWindSpeed,
         };
         setLbmPrerenderState({ status: 'ready', progress: 1 });
         frameRef.current = 0;
         setLbmFrameIndex(0);
         setLbmPlaying(true);
-        paintMetric(
-          getPrerenderFrame(prerenderRef.current, 0, lbmDisplayMode),
+        paintMetricRef.current(
+          getPrerenderFrame(
+            prerenderRef.current,
+            0,
+            useSimStore.getState().lbmDisplayMode,
+            useSimStore.getState().lbmFluidDensity,
+            useSimStore.getState().lbmWindSpeed,
+          ),
         );
         worker.terminate();
         prerenderWorkerRef.current = null;
@@ -309,7 +375,8 @@ export function LbmTunnelView() {
         type: 'run',
         nx,
         ny,
-        windSpeed: lbmWindSpeed,
+        windSpeed: useSimStore.getState().lbmWindSpeed,
+        fluidDensity: useSimStore.getState().lbmFluidDensity,
         renderStep,
         playbackSeconds: lbmPlaybackSeconds,
         obstacle: obstacleCopy.buffer,
@@ -319,14 +386,13 @@ export function LbmTunnelView() {
   }, [
     buildObstacle,
     cancelPrerender,
-    lbmDisplayMode,
     lbmPlaybackSeconds,
-    lbmWindSpeed,
     nx,
     ny,
     paintMetric,
     renderStep,
     setLbmFrameIndex,
+    seekLbmFrame,
     setLbmPlaying,
     setLbmPrerenderState,
   ]);
@@ -339,7 +405,6 @@ export function LbmTunnelView() {
     lbmRunMode,
     lbmSeed,
     lbmShapes,
-    lbmWindSpeed,
     lbmResolutionScale,
     lbmTunnelNx,
     lbmTunnelNy,
@@ -370,15 +435,48 @@ export function LbmTunnelView() {
 
   useEffect(() => {
     if (lbmRunMode !== 'prerender' || lbmPrerenderStatus !== 'ready' || !prerenderRef.current) return;
-    frameRef.current = 0;
-    setLbmFrameIndex(0);
-    paintMetric(getPrerenderFrame(prerenderRef.current, 0, lbmDisplayMode));
-  }, [lbmRewind, lbmRunMode, lbmPrerenderStatus, lbmDisplayMode, paintMetric, setLbmFrameIndex]);
+    frameRef.current = lbmFrameIndex;
+    if (!lbmPlaying) {
+      const { lbmDisplayMode, lbmFluidDensity, lbmWindSpeed } = useSimStore.getState();
+      paintMetricRef.current(
+        getPrerenderFrame(
+          prerenderRef.current,
+          lbmFrameIndex,
+          lbmDisplayMode,
+          lbmFluidDensity,
+          lbmWindSpeed,
+        ),
+      );
+    }
+  }, [
+    lbmFrameIndex,
+    lbmRunMode,
+    lbmPrerenderStatus,
+    lbmPlaying,
+    lbmFluidDensity,
+    lbmWindSpeed,
+  ]);
 
   useEffect(() => {
-    if (lbmRunMode !== 'prerender' || lbmPrerenderStatus !== 'ready') return;
+    if (lbmRunMode !== 'prerender' || lbmPrerenderStatus !== 'ready' || !prerenderRef.current) return;
+    frameRef.current = 0;
+    setLbmFrameIndex(0);
     paintCurrent();
-  }, [lbmRunMode, lbmPrerenderStatus, lbmDisplayMode, paintCurrent]);
+  }, [lbmRewind, lbmRunMode, lbmPrerenderStatus, paintCurrent, setLbmFrameIndex]);
+
+  useEffect(() => {
+    solverRef.current?.updateFluidDensity(lbmFluidDensity);
+    paintCurrentRef.current();
+  }, [lbmFluidDensity]);
+
+  useEffect(() => {
+    solverRef.current?.updateWindSpeed(lbmWindSpeed);
+    paintCurrentRef.current();
+  }, [lbmWindSpeed]);
+
+  useEffect(() => {
+    paintCurrentRef.current();
+  }, [lbmDisplayMode]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -389,6 +487,7 @@ export function LbmTunnelView() {
       if (!parent) return;
       canvas.width = parent.clientWidth;
       canvas.height = parent.clientHeight;
+      setCanvasSize({ w: canvas.width, h: canvas.height });
       paintCurrent();
     };
     resize();
@@ -419,8 +518,15 @@ export function LbmTunnelView() {
         const nextFrame = (frameRef.current + 1) % prerenderRef.current.totalFrames;
         frameRef.current = nextFrame;
         setLbmFrameIndex(nextFrame);
-        paintMetric(
-          getPrerenderFrame(prerenderRef.current, nextFrame, lbmDisplayMode),
+        const { lbmDisplayMode, lbmFluidDensity, lbmWindSpeed } = useSimStore.getState();
+        paintMetricRef.current(
+          getPrerenderFrame(
+            prerenderRef.current,
+            nextFrame,
+            lbmDisplayMode,
+            lbmFluidDensity,
+            lbmWindSpeed,
+          ),
         );
         return;
       }
@@ -435,7 +541,7 @@ export function LbmTunnelView() {
       const nextFrame = frameRef.current + 1;
       frameRef.current = nextFrame;
       setLbmFrameIndex(nextFrame);
-      paintMetric(solver.getMetric(lbmDisplayMode));
+      paintMetricRef.current(solver.getMetric(useSimStore.getState().lbmDisplayMode));
     };
 
     rafRef.current = requestAnimationFrame(tick);
@@ -447,14 +553,46 @@ export function LbmTunnelView() {
     lbmPlaying,
     lbmRunMode,
     lbmPrerenderStatus,
-    lbmDisplayMode,
     renderStep,
-    paintMetric,
     setLbmFrameIndex,
   ]);
 
   const showPrerenderPlaceholder =
     lbmRunMode === 'prerender' && lbmPrerenderStatus !== 'ready';
+
+  const updateBrushPreview = useCallback(
+    (clientX: number, clientY: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas || useSimStore.getState().lbmInteractionMode !== 'draw') {
+        setBrushPreview(null);
+        return;
+      }
+
+      setBrushPreview(
+        brushScreenCircle(
+          clientX,
+          clientY,
+          canvas,
+          nx,
+          ny,
+          useSimStore.getState().lbmBrushRadius,
+          lbmResolutionScale,
+          fitDrawRect,
+        ),
+      );
+    },
+    [lbmResolutionScale, nx, ny],
+  );
+
+  useEffect(() => {
+    if (lbmInteractionMode !== 'draw') {
+      setBrushPreview(null);
+    }
+  }, [lbmInteractionMode]);
+
+  useEffect(() => {
+    setBrushPreview(null);
+  }, [lbmBrushRadius, lbmResolutionScale, nx, ny]);
 
   const applyDragAt = useCallback(
     (clientX: number, clientY: number) => {
@@ -499,6 +637,130 @@ export function LbmTunnelView() {
     }
   }, [commitLbmShapeLayout, setLbmPlaying]);
 
+  const syncDrawStroke = useCallback(
+    (draw: NonNullable<typeof drawRef.current>) => {
+      if (!draw.shapeId || !draw.stencilKeys) return;
+      const { stencilX, stencilY } = stencilArraysFromKeys(draw.stencilKeys);
+      updateLbmShapeStencil(draw.shapeId, stencilX, stencilY);
+      rebuildObstacleVisual();
+      paintCurrent();
+    },
+    [paintCurrent, rebuildObstacleVisual, updateLbmShapeStencil],
+  );
+
+  const applyDrawAt = useCallback(
+    (clientX: number, clientY: number, startStroke: boolean) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const grid = screenToGrid(clientX, clientY, canvas, nx, ny, fitDrawRect);
+      if (!grid) return;
+
+      const lx = grid.gx / lbmResolutionScale;
+      const ly = grid.gy / lbmResolutionScale;
+      const wasPlaying = useSimStore.getState().lbmPlaying;
+      const runMode = useSimStore.getState().lbmRunMode;
+      const density = useSimStore.getState().lbmDrawDensity;
+      if (runMode !== 'live') {
+        setLbmPlaying(false);
+      }
+
+      const previousPoint =
+        startStroke || !drawRef.current
+          ? null
+          : { lx: drawRef.current.lastLx, ly: drawRef.current.lastLy };
+      const points = strokeLogicalPoints(previousPoint, { lx, ly });
+
+      if (density === 'decrease') {
+        for (const point of points) {
+          applyLbmEraseBrush(point.lx, point.ly, lbmBrushRadius);
+        }
+        drawRef.current = {
+          mode: 'decrease',
+          lastLx: lx,
+          lastLy: ly,
+          wasPlaying,
+        };
+        setIsDrawing(true);
+        rebuildObstacleVisual();
+        paintCurrent();
+        return;
+      }
+
+      let draw = drawRef.current;
+      if (startStroke || !draw?.shapeId || !draw.stencilKeys || draw.cx === undefined || draw.cy === undefined) {
+        const cx = Math.round(lx);
+        const cy = Math.round(ly);
+        const stencilKeys = new Set<string>();
+        for (const point of points) {
+          addBrushToStencilSet(stencilKeys, cx, cy, point.lx, point.ly, lbmBrushRadius);
+        }
+        const shapeId = nextLbmShapeId();
+        const drawnCount = useSimStore
+          .getState()
+          .lbmShapes.filter((shape) => shape.customSource === 'drawn').length;
+
+        addLbmShape({
+          id: shapeId,
+          type: 'custom',
+          customSource: 'drawn',
+          name: `Drawn ${drawnCount + 1}`,
+          cx,
+          cy,
+          aoa: 0,
+          customScale: 1,
+          ...stencilArraysFromKeys(stencilKeys),
+        });
+        setSelectedLbmShapeId(shapeId);
+        draw = {
+          mode: 'increase',
+          shapeId,
+          cx,
+          cy,
+          stencilKeys,
+          lastLx: lx,
+          lastLy: ly,
+          wasPlaying,
+        };
+        drawRef.current = draw;
+        setIsDrawing(true);
+      } else {
+        for (const point of points) {
+          addBrushToStencilSet(draw.stencilKeys, draw.cx, draw.cy, point.lx, point.ly, lbmBrushRadius);
+        }
+        draw.lastLx = lx;
+        draw.lastLy = ly;
+      }
+
+      syncDrawStroke(draw);
+    },
+    [
+      addLbmShape,
+      applyLbmEraseBrush,
+      lbmBrushRadius,
+      lbmResolutionScale,
+      nx,
+      ny,
+      setLbmPlaying,
+      setSelectedLbmShapeId,
+      syncDrawStroke,
+      rebuildObstacleVisual,
+      paintCurrent,
+    ],
+  );
+
+  const endDraw = useCallback(() => {
+    const draw = drawRef.current;
+    if (!draw) return;
+
+    drawRef.current = null;
+    setIsDrawing(false);
+    commitLbmShapeLayout();
+    if (draw.wasPlaying) {
+      setLbmPlaying(true);
+    }
+  }, [commitLbmShapeLayout, setLbmPlaying]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || showPrerenderPlaceholder) return;
@@ -506,6 +768,14 @@ export function LbmTunnelView() {
     const onPointerDown = (e: PointerEvent) => {
       const grid = screenToGrid(e.clientX, e.clientY, canvas, nx, ny, fitDrawRect);
       if (!grid) return;
+
+      if (useSimStore.getState().lbmInteractionMode === 'draw') {
+        e.preventDefault();
+        canvas.setPointerCapture(e.pointerId);
+        updateBrushPreview(e.clientX, e.clientY);
+        applyDrawAt(e.clientX, e.clientY, true);
+        return;
+      }
 
       const shape = findShapeAtGrid(
         grid.gx,
@@ -541,6 +811,19 @@ export function LbmTunnelView() {
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      if (useSimStore.getState().lbmInteractionMode === 'draw') {
+        updateBrushPreview(e.clientX, e.clientY);
+        if (drawRef.current) {
+          applyDrawAt(e.clientX, e.clientY, false);
+        }
+        return;
+      }
+
+      if (drawRef.current) {
+        applyDrawAt(e.clientX, e.clientY, false);
+        return;
+      }
+
       if (dragRef.current) {
         applyDragAt(e.clientX, e.clientY);
         return;
@@ -563,12 +846,21 @@ export function LbmTunnelView() {
     };
 
     const onPointerLeave = () => {
-      if (!dragRef.current) {
+      setBrushPreview(null);
+      if (!dragRef.current && !drawRef.current) {
         setHoveredLbmShapeId(null);
       }
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      if (drawRef.current) {
+        if (canvas.hasPointerCapture(e.pointerId)) {
+          canvas.releasePointerCapture(e.pointerId);
+        }
+        endDraw();
+        return;
+      }
+
       if (!dragRef.current) return;
       if (canvas.hasPointerCapture(e.pointerId)) {
         canvas.releasePointerCapture(e.pointerId);
@@ -591,7 +883,10 @@ export function LbmTunnelView() {
     };
   }, [
     applyDragAt,
+    applyDrawAt,
     endDrag,
+    endDraw,
+    updateBrushPreview,
     lbmResolutionScale,
     nx,
     ny,
@@ -656,21 +951,84 @@ export function LbmTunnelView() {
           className={[
             'lbm-canvas',
             showPrerenderPlaceholder ? 'lbm-canvas-hidden' : '',
-            isDragging ? 'lbm-canvas-dragging' : hoveredLbmShapeId ? 'lbm-canvas-grab' : '',
+            isDrawing
+              ? 'lbm-canvas-drawing'
+              : lbmInteractionMode === 'draw'
+                ? 'lbm-canvas-draw'
+                : isDragging
+                  ? 'lbm-canvas-dragging'
+                  : hoveredLbmShapeId
+                    ? 'lbm-canvas-grab'
+                    : '',
           ]
             .filter(Boolean)
             .join(' ')}
         />
-        {!showPrerenderPlaceholder && (
-          <LbmColorLegend displayMode={lbmDisplayMode} windSpeed={lbmWindSpeed} />
-        )}
+        {brushPreview &&
+          !showPrerenderPlaceholder &&
+          lbmInteractionMode === 'draw' &&
+          canvasSize.w > 0 && (
+            <svg
+              className="lbm-brush-overlay"
+              viewBox={`0 0 ${canvasSize.w} ${canvasSize.h}`}
+              aria-hidden
+            >
+              <circle
+                cx={brushPreview.cx}
+                cy={brushPreview.cy}
+                r={brushPreview.r}
+                className={
+                  lbmDrawDensity === 'decrease'
+                    ? 'lbm-brush-outline erase'
+                    : 'lbm-brush-outline'
+                }
+              />
+            </svg>
+          )}
       </div>
       <div className="lbm-axis-labels">
         <span>Length</span>
         <span>Height</span>
       </div>
+      {lbmRunMode === 'prerender' &&
+        lbmPrerenderStatus === 'ready' &&
+        !showPrerenderPlaceholder && (
+          <div className="lbm-scrubber">
+            <input
+              type="range"
+              className="lbm-scrubber-input"
+              min={0}
+              max={Math.max(0, totalFrames - 1)}
+              value={Math.min(lbmFrameIndex, Math.max(0, totalFrames - 1))}
+              onPointerDown={() => setLbmPlaying(false)}
+              onInput={(e) => seekLbmFrame(parseInt(e.currentTarget.value, 10))}
+              aria-label="Scrub pre-rendered simulation"
+            />
+            <div className="lbm-scrubber-meta">
+              <span>
+                {lbmElapsedSec.toFixed(1)}s / {lbmPlaybackSeconds.toFixed(1)}s
+              </span>
+              <span>
+                Frame {lbmFrameIndex + 1} / {totalFrames}
+              </span>
+            </div>
+          </div>
+        )}
       {!showPrerenderPlaceholder && (
-        <p className="lbm-drag-hint">Click and drag shapes to move them</p>
+        <LbmColorLegend
+          displayMode={lbmDisplayMode}
+          windSpeed={lbmWindSpeed}
+          fluidDensity={lbmFluidDensity}
+        />
+      )}
+      {!showPrerenderPlaceholder && (
+        <p className="lbm-drag-hint">
+          {lbmInteractionMode === 'draw'
+            ? lbmDrawDensity === 'decrease'
+              ? 'Drag on the canvas to erase painted obstacles'
+              : 'Click and drag on the canvas to paint obstacles'
+            : 'Click and drag shapes to move them'}
+        </p>
       )}
     </div>
   );

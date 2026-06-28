@@ -1,7 +1,7 @@
 import type { LbmShapeInput } from '@/types';
 
 export interface LbmShapeSpec {
-  type: 'square' | 'circle' | 'airfoil';
+  type: 'square' | 'circle' | 'airfoil' | 'custom';
   cx: number;
   cy: number;
   aoa: number;
@@ -10,6 +10,9 @@ export interface LbmShapeSpec {
   radius?: number;
   chord?: number;
   naca?: string;
+  customScale?: number;
+  stencilX?: number[];
+  stencilY?: number[];
 }
 
 export function lbmInputToSpec(shape: LbmShapeInput): LbmShapeSpec {
@@ -23,6 +26,9 @@ export function lbmInputToSpec(shape: LbmShapeInput): LbmShapeSpec {
     width: shape.width,
     height: shape.height,
     radius: shape.radius,
+    customScale: shape.customScale,
+    stencilX: shape.stencilX,
+    stencilY: shape.stencilY,
   };
 }
 
@@ -31,15 +37,22 @@ export function scaleShapeSpecs(
   shapes: LbmShapeSpec[],
   resolutionScale: number,
 ): LbmShapeSpec[] {
-  return shapes.map((shape) => ({
-    ...shape,
-    cx: shape.cx * resolutionScale,
-    cy: shape.cy * resolutionScale,
-    width: shape.width !== undefined ? shape.width * resolutionScale : undefined,
-    height: shape.height !== undefined ? shape.height * resolutionScale : undefined,
-    radius: shape.radius !== undefined ? shape.radius * resolutionScale : undefined,
-    chord: shape.chord !== undefined ? shape.chord * resolutionScale : undefined,
-  }));
+  return shapes.map((shape) => {
+    const sizeScale = resolutionScale * (shape.customScale ?? 1);
+    return {
+      ...shape,
+      cx: shape.cx * resolutionScale,
+      cy: shape.cy * resolutionScale,
+      width: shape.width !== undefined ? shape.width * resolutionScale : undefined,
+      height: shape.height !== undefined ? shape.height * resolutionScale : undefined,
+      radius: shape.radius !== undefined ? shape.radius * resolutionScale : undefined,
+      chord: shape.chord !== undefined ? shape.chord * resolutionScale : undefined,
+      stencilX:
+        shape.stencilX?.map((v) => Math.round(v * sizeScale)) ?? shape.stencilX,
+      stencilY:
+        shape.stencilY?.map((v) => Math.round(v * sizeScale)) ?? shape.stencilY,
+    };
+  });
 }
 
 /** Build obstacle mask — direct port of gem.py multi-obstacle generation. */
@@ -60,6 +73,11 @@ export function buildObstacleMask(
 
     if (shape.type === 'airfoil') {
       stampAirfoil(obstacle, nx, ny, shape, cx, cy, cosA, sinA);
+      continue;
+    }
+
+    if (shape.type === 'custom') {
+      stampCustom(obstacle, nx, ny, shape, cx, cy, cosA, sinA);
       continue;
     }
 
@@ -87,6 +105,31 @@ export function buildObstacleMask(
   }
 
   return obstacle;
+}
+
+function stampCustom(
+  obstacle: Uint8Array,
+  nx: number,
+  ny: number,
+  shape: LbmShapeSpec,
+  cx: number,
+  cy: number,
+  cosA: number,
+  sinA: number,
+): void {
+  const stencilX = shape.stencilX;
+  const stencilY = shape.stencilY;
+  if (!stencilX?.length || !stencilY?.length) return;
+
+  for (let i = 0; i < stencilX.length; i++) {
+    const xRot = stencilX[i] * cosA - stencilY[i] * sinA;
+    const yRot = stencilX[i] * sinA + stencilY[i] * cosA;
+    const gridX = Math.round(cx + xRot);
+    const gridY = Math.round(cy + yRot);
+    if (gridX >= 0 && gridX < nx && gridY >= 0 && gridY < ny) {
+      obstacle[gridX * ny + gridY] = 1;
+    }
+  }
 }
 
 function stampAirfoil(
@@ -159,6 +202,12 @@ function stampAirfoil(
       }
     }
   }
+}
+
+let lbmShapeIdCounter = 100;
+
+export function nextLbmShapeId(): string {
+  return `lbm-${++lbmShapeIdCounter}`;
 }
 
 export function defaultLbmShapes(): LbmShapeInput[] {

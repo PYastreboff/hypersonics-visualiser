@@ -25,7 +25,13 @@ export type LbmRunMode = 'live' | 'prerender';
 
 export type LbmPrerenderStatus = 'idle' | 'running' | 'ready' | 'error' | 'cancelled';
 
-export type LbmShapeType = 'airfoil' | 'square' | 'circle';
+export type LbmShapeType = 'airfoil' | 'square' | 'circle' | 'custom';
+
+export type LbmInteractionMode = 'select' | 'draw';
+
+export type LbmDrawDensity = 'increase' | 'decrease';
+
+export type LbmCustomSource = 'drawn' | 'imported';
 
 export interface LbmShapeInput {
   id: string;
@@ -38,6 +44,11 @@ export interface LbmShapeInput {
   width?: number;
   height?: number;
   radius?: number;
+  name?: string;
+  customSource?: LbmCustomSource;
+  customScale?: number;
+  stencilX?: number[];
+  stencilY?: number[];
 }
 
 export type SlicePlane = 'xy' | 'xz' | 'yz';

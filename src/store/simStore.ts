@@ -200,7 +200,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   lbmElapsedSec: 0,
   lbmFrameIndex: 0,
   lbmSeed: 0,
-  lbmRunMode: 'prerender',
+  lbmRunMode: 'live',
   lbmPrerenderStatus: 'idle',
   lbmPrerenderProgress: 0,
   lbmRewind: 0,

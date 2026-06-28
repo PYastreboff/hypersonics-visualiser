@@ -125,7 +125,9 @@ export function LbmTunnelView() {
   const prerenderRef = useRef<LbmPrerenderResult | null>(null);
   const prerenderWorkerRef = useRef<Worker | null>(null);
   const prerenderRunIdRef = useRef(0);
+  const eulerRunIdRef = useRef(0);
   const [prerenderBackend, setPrerenderBackend] = useState<'gpu' | 'cpu' | null>(null);
+  const [eulerBackend, setEulerBackend] = useState<'gpu' | 'wasm' | 'cpu' | null>(null);
   const eulerResultRef = useRef<EulerTunnelResult | null>(null);
   const eulerWorkerRef = useRef<Worker | null>(null);
   const dragRef = useRef<{
@@ -365,6 +367,7 @@ export function LbmTunnelView() {
   }, [nx, ny, lbmResolutionScale, paintMetric, setLbmFrameIndex]);
 
   const cancelEulerRun = useCallback(() => {
+    eulerRunIdRef.current += 1;
     if (eulerWorkerRef.current) {
       eulerWorkerRef.current.postMessage({ type: 'cancel' });
       eulerWorkerRef.current.terminate();
@@ -375,12 +378,14 @@ export function LbmTunnelView() {
   const startEulerRun = useCallback(() => {
     cancelEulerRun();
 
+    const runId = ++eulerRunIdRef.current;
     const obstacle = buildObstacle();
     obstacleRef.current = obstacle;
     const obstacleCopy = new Uint8Array(obstacle);
     const { lbmEulerMach, lbmEulerAltitude } = useSimStore.getState();
 
     setEulerTunnelState({ status: 'running', progress: 0 });
+    setEulerBackend(null);
 
     const worker = new Worker(
       new URL('../workers/eulerTunnel.worker.ts', import.meta.url),
@@ -388,10 +393,14 @@ export function LbmTunnelView() {
     );
     eulerWorkerRef.current = worker;
 
+    const isCurrentRun = () => runId === eulerRunIdRef.current;
+
     worker.onmessage = (e: MessageEvent) => {
+      if (!isCurrentRun()) return;
       const data = e.data;
       if (data.type === 'progress') {
         setEulerTunnelState({ progress: data.progress });
+        if (data.backend) setEulerBackend(data.backend);
       } else if (data.type === 'complete') {
         eulerResultRef.current = {
           nx: data.nx,
@@ -403,18 +412,37 @@ export function LbmTunnelView() {
           pressure: data.pressure,
         };
         setEulerTunnelState({ status: 'ready', progress: 1 });
+        if (data.backend) setEulerBackend(data.backend);
         paintMetricRef.current(
           getEulerTunnelMetric(eulerResultRef.current, useSimStore.getState().lbmDisplayMode),
         );
         worker.terminate();
-        eulerWorkerRef.current = null;
+        if (eulerWorkerRef.current === worker) {
+          eulerWorkerRef.current = null;
+        }
       } else if (data.type === 'error') {
+        console.error('Euler worker error:', data.error);
         setEulerTunnelState({ status: 'error', progress: 0 });
         worker.terminate();
-        eulerWorkerRef.current = null;
+        if (eulerWorkerRef.current === worker) {
+          eulerWorkerRef.current = null;
+        }
       } else if (data.type === 'cancelled') {
-        setEulerTunnelState({ status: 'cancelled', progress: 0 });
+        if (eulerWorkerRef.current === worker) {
+          setEulerTunnelState({ status: 'cancelled', progress: 0 });
+        }
         worker.terminate();
+        if (eulerWorkerRef.current === worker) {
+          eulerWorkerRef.current = null;
+        }
+      }
+    };
+
+    worker.onerror = () => {
+      if (!isCurrentRun()) return;
+      setEulerTunnelState({ status: 'error', progress: 0 });
+      worker.terminate();
+      if (eulerWorkerRef.current === worker) {
         eulerWorkerRef.current = null;
       }
     };
@@ -1121,7 +1149,11 @@ export function LbmTunnelView() {
                 {lbmPhysicsMode === 'euler'
                   ? eulerTunnelStatus === 'error'
                     ? 'Euler solve failed — try a lower Mach or coarser grid.'
-                    : 'Computing compressible inviscid flow on the tunnel grid.'
+                    : eulerBackend === 'gpu'
+                      ? 'Computing inviscid flow on GPU (WebGPU).'
+                      : eulerBackend === 'wasm'
+                        ? 'Computing inviscid flow with WASM SIMD.'
+                        : 'Computing compressible inviscid flow on the tunnel grid.'
                   : lbmPrerenderStatus === 'error'
                     ? 'Pre-render failed — adjust settings or switch to Live mode.'
                     : prerenderBackend === 'gpu'

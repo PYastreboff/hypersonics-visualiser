@@ -7,8 +7,8 @@ import {
 
 describe('fluidVelocityMaxDelta', () => {
   it('returns zero for identical velocity fields', () => {
-    const u = new Float64Array([10, 20, 0]);
-    const v = new Float64Array([0, 1, 0]);
+    const u = new Float32Array([10, 20, 0]);
+    const v = new Float32Array([0, 1, 0]);
     const solid = new Uint8Array([0, 0, 1]);
     expect(fluidVelocityMaxDelta(u, v, u, v, solid, 100)).toBe(0);
   });

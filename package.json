@@ -11,7 +11,8 @@
     "preview:pages": "npm run build:pages && vite preview --base /hypersonics-visualiser/",
     "deploy": "npm run build:pages && touch dist/.nojekyll && gh-pages -d dist --dotfiles",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:wasm": "cd wasm/euler-tunnel-wasm && RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --target web --out-dir ../../src/wasm/euler-tunnel/pkg"
   },
   "dependencies": {
     "@react-three/drei": "^10.0.5",

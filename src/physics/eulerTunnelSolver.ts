@@ -27,13 +27,14 @@ export interface EulerTunnelResult {
 }
 
 type Conserved = [number, number, number, number];
+type ScalarField = Float32Array;
 
 /** Max relative change in velocity (L∞) between two states, fluid cells only. */
 export function fluidVelocityMaxDelta(
-  uA: Float64Array,
-  vA: Float64Array,
-  uB: Float64Array,
-  vB: Float64Array,
+  uA: ScalarField,
+  vA: ScalarField,
+  uB: ScalarField,
+  vB: ScalarField,
   solid: Uint8Array,
   speedScale: number,
 ): number {
@@ -77,19 +78,17 @@ function rusanovX(
   uR: number,
   vR: number,
   pR: number,
+  waveSpeed: number,
 ): Conserved {
   const fL = fluxX(rL, uL, vL, pL);
   const fR = fluxX(rR, uR, vR, pR);
-  const aL = soundSpeed(rL, pL);
-  const aR = soundSpeed(rR, pR);
-  const s = Math.max(Math.abs(uL) + aL, Math.abs(uR) + aR);
   const uL_c: Conserved = [rL, rL * uL, rL * vL, pL / (GAMMA - 1) + 0.5 * rL * (uL * uL + vL * vL)];
   const uR_c: Conserved = [rR, rR * uR, rR * vR, pR / (GAMMA - 1) + 0.5 * rR * (uR * uR + vR * vR)];
   return [
-    0.5 * (fL[0] + fR[0]) - 0.5 * s * (uR_c[0] - uL_c[0]),
-    0.5 * (fL[1] + fR[1]) - 0.5 * s * (uR_c[1] - uL_c[1]),
-    0.5 * (fL[2] + fR[2]) - 0.5 * s * (uR_c[2] - uL_c[2]),
-    0.5 * (fL[3] + fR[3]) - 0.5 * s * (uR_c[3] - uL_c[3]),
+    0.5 * (fL[0] + fR[0]) - 0.5 * waveSpeed * (uR_c[0] - uL_c[0]),
+    0.5 * (fL[1] + fR[1]) - 0.5 * waveSpeed * (uR_c[1] - uL_c[1]),
+    0.5 * (fL[2] + fR[2]) - 0.5 * waveSpeed * (uR_c[2] - uL_c[2]),
+    0.5 * (fL[3] + fR[3]) - 0.5 * waveSpeed * (uR_c[3] - uL_c[3]),
   ];
 }
 
@@ -102,19 +101,17 @@ function rusanovY(
   uT: number,
   vT: number,
   pT: number,
+  waveSpeed: number,
 ): Conserved {
   const fB = fluxY(rB, uB, vB, pB);
   const fT = fluxY(rT, uT, vT, pT);
-  const aB = soundSpeed(rB, pB);
-  const aT = soundSpeed(rT, pT);
-  const s = Math.max(Math.abs(vB) + aB, Math.abs(vT) + aT);
   const uB_c: Conserved = [rB, rB * uB, rB * vB, pB / (GAMMA - 1) + 0.5 * rB * (uB * uB + vB * vB)];
   const uT_c: Conserved = [rT, rT * uT, rT * vT, pT / (GAMMA - 1) + 0.5 * rT * (uT * uT + vT * vT)];
   return [
-    0.5 * (fB[0] + fT[0]) - 0.5 * s * (uT_c[0] - uB_c[0]),
-    0.5 * (fB[1] + fT[1]) - 0.5 * s * (uT_c[1] - uB_c[1]),
-    0.5 * (fB[2] + fT[2]) - 0.5 * s * (uT_c[2] - uB_c[2]),
-    0.5 * (fB[3] + fT[3]) - 0.5 * s * (uT_c[3] - uB_c[3]),
+    0.5 * (fB[0] + fT[0]) - 0.5 * waveSpeed * (uT_c[0] - uB_c[0]),
+    0.5 * (fB[1] + fT[1]) - 0.5 * waveSpeed * (uT_c[1] - uB_c[1]),
+    0.5 * (fB[2] + fT[2]) - 0.5 * waveSpeed * (uT_c[2] - uB_c[2]),
+    0.5 * (fB[3] + fT[3]) - 0.5 * waveSpeed * (uT_c[3] - uB_c[3]),
   ];
 }
 
@@ -135,16 +132,19 @@ export function runEulerTunnel(
   const Ly = Lx * (ny / nx);
   const dx = Lx / nx;
   const dy = Ly / ny;
+  const invDx = 1 / dx;
+  const invDy = 1 / dy;
   const n = nx * ny;
 
-  let rhoA = new Float64Array(n);
-  let uA = new Float64Array(n);
-  let vA = new Float64Array(n);
-  let pA = new Float64Array(n);
-  let rhoB = new Float64Array(n);
-  let uB = new Float64Array(n);
-  let vB = new Float64Array(n);
-  let pB = new Float64Array(n);
+  let rhoA = new Float32Array(n);
+  let uA = new Float32Array(n);
+  let vA = new Float32Array(n);
+  let pA = new Float32Array(n);
+  let rhoB = new Float32Array(n);
+  let uB = new Float32Array(n);
+  let vB = new Float32Array(n);
+  let pB = new Float32Array(n);
+  const aScratch = new Float32Array(n);
   const solid = new Uint8Array(n);
 
   for (let x = 0; x < nx; x++) {
@@ -174,10 +174,10 @@ export function runEulerTunnel(
   let stableChecks = 0;
 
   const applyBoundaryConditions = (
-    rho: Float64Array,
-    u: Float64Array,
-    v: Float64Array,
-    p: Float64Array,
+    rho: ScalarField,
+    u: ScalarField,
+    v: ScalarField,
+    p: ScalarField,
   ) => {
     for (let y = 0; y < ny; y++) {
       const inGhost = idx(nx - 2, y, ny);
@@ -207,13 +207,59 @@ export function runEulerTunnel(
     }
   };
 
+  const cellSize = Math.min(dx, dy);
+
   for (let step = 0; step < maxSteps; step++) {
     if (cancelled()) throw new Error('cancelled');
     if (step % 25 === 0) onProgress(step / maxSteps);
 
+    for (let i = 0; i < n; i++) {
+      if (solid[i]) continue;
+      aScratch[i] = soundSpeed(rhoA[i], pA[i]);
+    }
+
+    let maxLambda = 1;
     for (let x = 1; x < nx - 1; x++) {
+      const xBase = x * ny;
       for (let y = 1; y < ny - 1; y++) {
-        const id = idx(x, y, ny);
+        const id = xBase + y;
+        if (solid[id]) continue;
+
+        const idL = id - ny;
+        const idR = id + ny;
+        const idB = id - 1;
+        const idT = id + 1;
+
+        const ux = uA[id];
+        const vy = vA[id];
+        const aC = aScratch[id];
+        let lambda = Math.max(Math.abs(ux) + aC, Math.abs(vy) + aC);
+
+        const uL = uA[idL];
+        const aL = aScratch[idL];
+        lambda = Math.max(lambda, Math.abs(uL) + aL);
+
+        const uR = uA[idR];
+        const aR = aScratch[idR];
+        lambda = Math.max(lambda, Math.abs(uR) + aR);
+
+        const vB_n = vA[idB];
+        const aB = aScratch[idB];
+        lambda = Math.max(lambda, Math.abs(vB_n) + aB);
+
+        const vT = vA[idT];
+        const aT = aScratch[idT];
+        lambda = Math.max(lambda, Math.abs(vT) + aT);
+
+        if (lambda > maxLambda) maxLambda = lambda;
+      }
+    }
+    const dt = (cfl * cellSize) / maxLambda;
+
+    for (let x = 1; x < nx - 1; x++) {
+      const xBase = x * ny;
+      for (let y = 1; y < ny - 1; y++) {
+        const id = xBase + y;
         if (solid[id]) {
           rhoB[id] = rho0;
           uB[id] = 0;
@@ -228,51 +274,57 @@ export function runEulerTunnel(
         const pr = pA[id];
         const E = pr / (GAMMA - 1) + 0.5 * r * (ux * ux + vy * vy);
 
-        const idL = idx(x - 1, y, ny);
-        const idR = idx(x + 1, y, ny);
-        const idB = idx(x, y - 1, ny);
-        const idT = idx(x, y + 1, ny);
+        const idL = id - ny;
+        const idR = id + ny;
+        const idB = id - 1;
+        const idT = id + 1;
+
+        const uL = uA[idL];
+        const uR = uA[idR];
+        const vB_n = vA[idB];
+        const vT = vA[idT];
+        const aC = aScratch[id];
+        const aL = aScratch[idL];
+        const aR = aScratch[idR];
+        const aB = aScratch[idB];
+        const aT = aScratch[idT];
 
         const fxR = rusanovX(
-          rhoA[id], uA[id], vA[id], pA[id],
-          rhoA[idR], uA[idR], vA[idR], pA[idR],
+          r, ux, vy, pr,
+          rhoA[idR], uR, vA[idR], pA[idR],
+          Math.max(Math.abs(ux) + aC, Math.abs(uR) + aR),
         );
         const fxL = rusanovX(
-          rhoA[idL], uA[idL], vA[idL], pA[idL],
-          rhoA[id], uA[id], vA[id], pA[id],
+          rhoA[idL], uL, vA[idL], pA[idL],
+          r, ux, vy, pr,
+          Math.max(Math.abs(uL) + aL, Math.abs(ux) + aC),
         );
         const fyT = rusanovY(
-          rhoA[id], uA[id], vA[id], pA[id],
-          rhoA[idT], uA[idT], vA[idT], pA[idT],
+          r, ux, vy, pr,
+          rhoA[idT], uA[idT], vT, pA[idT],
+          Math.max(Math.abs(vy) + aC, Math.abs(vT) + aT),
         );
         const fyB = rusanovY(
-          rhoA[idB], uA[idB], vA[idB], pA[idB],
-          rhoA[id], uA[id], vA[id], pA[id],
+          rhoA[idB], uA[idB], vB_n, pA[idB],
+          r, ux, vy, pr,
+          Math.max(Math.abs(vB_n) + aB, Math.abs(vy) + aC),
         );
 
-        const a = soundSpeed(r, pr);
-        const lambda = Math.max(
-          Math.abs(ux) + a,
-          Math.abs(uA[idL]) + soundSpeed(rhoA[idL], pA[idL]),
-          Math.abs(uA[idR]) + soundSpeed(rhoA[idR], pA[idR]),
-          Math.abs(vy) + a,
-          Math.abs(vA[idB]) + soundSpeed(rhoA[idB], pA[idB]),
-          Math.abs(vA[idT]) + soundSpeed(rhoA[idT], pA[idT]),
-        );
-        const dt = (cfl * Math.min(dx, dy)) / Math.max(lambda, 1);
-
-        const dRho = -(fxR[0] - fxL[0]) / dx - (fyT[0] - fyB[0]) / dy;
-        const dRhoU = -(fxR[1] - fxL[1]) / dx - (fyT[1] - fyB[1]) / dy;
-        const dRhoV = -(fxR[2] - fxL[2]) / dx - (fyT[2] - fyB[2]) / dy;
-        const dE = -(fxR[3] - fxL[3]) / dx - (fyT[3] - fyB[3]) / dy;
+        const dRho = -(fxR[0] - fxL[0]) * invDx - (fyT[0] - fyB[0]) * invDy;
+        const dRhoU = -(fxR[1] - fxL[1]) * invDx - (fyT[1] - fyB[1]) * invDy;
+        const dRhoV = -(fxR[2] - fxL[2]) * invDx - (fyT[2] - fyB[2]) * invDy;
+        const dE = -(fxR[3] - fxL[3]) * invDx - (fyT[3] - fyB[3]) * invDy;
 
         rhoB[id] = Math.max(1e-6, r + dt * dRho);
         const rhoU = r * ux + dt * dRhoU;
         const rhoV = r * vy + dt * dRhoV;
         const EN = E + dt * dE;
-        uB[id] = rhoU / rhoB[id];
-        vB[id] = rhoV / rhoB[id];
-        pB[id] = Math.max(1e3, (GAMMA - 1) * (EN - 0.5 * rhoB[id] * (uB[id] ** 2 + vB[id] ** 2)));
+        const rhoNew = rhoB[id];
+        const uNew = rhoU / rhoNew;
+        const vNew = rhoV / rhoNew;
+        uB[id] = uNew;
+        vB[id] = vNew;
+        pB[id] = Math.max(1e3, (GAMMA - 1) * (EN - 0.5 * rhoNew * (uNew * uNew + vNew * vNew)));
       }
     }
 

@@ -30,7 +30,9 @@ jobs:
 
       - run: npm ci
       - run: npm test
-      - run: npm run build:pages
+      - run: npm run build
+        env:
+          VITE_BASE_PATH: /${{ github.event.repository.name }}/
       - run: touch dist/.nojekyll
 
       - uses: actions/configure-pages@v4

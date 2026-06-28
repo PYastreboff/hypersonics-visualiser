@@ -37,26 +37,29 @@ Open http://localhost:5173
 
 ## GitHub Pages
 
-Pushes to `main` build with base path `/flow-visualiser/` and deploy via GitHub Actions.
+Pushes to `main` build with base path `/<repo-name>/` (e.g. `/hypersonics-visualiser/`) and deploy via GitHub Actions.
 
 1. Push this repo to GitHub.
 2. In the repo: **Settings → Pages → Build and deployment → Source** → select **GitHub Actions** (not “Deploy from a branch” and not `main`).
 3. Push to `main` — the [Deploy workflow](.github/workflows/deploy.yml) runs tests, builds, and publishes `dist/`.
 
-The site will be at **https://pyastreboff.github.io/flow-visualiser/** (rename the GitHub repo to `flow-visualiser` for this URL to work).
+The site will be at **https://pyastreboff.github.io/hypersonics-visualiser/**
 
-If you see a blank page, Pages is probably still deploying the `main` branch (which only has source files, not the built app). Switch the source to **GitHub Actions**.
+**Blank white page?** Usually one of these:
+
+- **Wrong base path** — the build must use `/hypersonics-visualiser/` (matching the GitHub repo name). Asset URLs like `/flow-visualiser/assets/...` will 404.
+- **Pages source is wrong** — use **GitHub Actions**, not the `main` branch (source only, no built app) or a stale `gh-pages` branch from an old manual deploy.
+- **Wrong URL** — open the project URL above, not the raw `gh-pages` branch file listing on GitHub.
 
 To preview the Pages build locally:
 
 ```bash
-npm run build:pages
-npx vite preview --base /flow-visualiser/ --port 4173
+npm run preview:pages
 ```
 
-Then open http://localhost:4173/flow-visualiser/
+Then open http://localhost:4173/hypersonics-visualiser/
 
-To deploy manually: `npm run deploy` (pushes `dist/` to the `gh-pages` branch — only if you use branch-based Pages).
+To deploy manually to the `gh-pages` branch (only if Pages source is set to that branch): `npm run deploy`
 
 ## Physics limitations
 

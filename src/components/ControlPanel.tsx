@@ -31,7 +31,7 @@ export function ControlPanel() {
 
   return (
     <div className="panel control-panel">
-      <h2>Wind Tunnel</h2>
+      <h2>Flow</h2>
 
       <div className="control-group">
         <SettingLabel
@@ -140,7 +140,7 @@ export function ControlPanel() {
       </div>
 
       <div className="control-group">
-        <h4>Visualization</h4>
+        <h4>Visualization (3D)</h4>
         <label className="checkbox" title="Static flow lines traced through the velocity field (recomputed when settings change)">
           <input type="checkbox" checked={showStreamlines} onChange={toggleStreamlines} />
           Streamlines

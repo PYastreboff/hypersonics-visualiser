@@ -179,7 +179,7 @@ ax.set_ylabel("Y (Channel Height)")
 def update(frame_idx):
     im.set_data(frames_data[frame_idx].T)
     im_gray.set_data(np.ma.masked_where(~obstacle, gray_fill).T)
-    ax.set_title(f"CFD Wind Tunnel | Mode: {DISPLAY_MODE.upper()} | Time: {round((frame_idx * 30)/1000, 1)}s / {PLAYBACK_TIME_SECONDS}s")
+    ax.set_title(f"Flow Visualiser | Mode: {DISPLAY_MODE.upper()} | Time: {round((frame_idx * 30)/1000, 1)}s / {PLAYBACK_TIME_SECONDS}s")
     return [im, im_gray]
 
 ani = animation.FuncAnimation(fig, update, frames=len(frames_data), interval=30, blit=False)

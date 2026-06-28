@@ -51,6 +51,50 @@ body,
   margin-top: 0.15rem;
 }
 
+.app-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.view-toggle {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.view-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.view-toggle-badge {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.12rem 0.35rem;
+  border-radius: 3px;
+  background: rgba(255, 170, 68, 0.15);
+  color: var(--warn);
+  border: 1px solid rgba(255, 170, 68, 0.35);
+}
+
+.view-toggle button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(74, 158, 255, 0.12);
+}
+
 .app-layout {
   display: flex;
   flex: 1;
@@ -90,6 +134,294 @@ body,
   display: block;
 }
 
+.lbm-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #0a0e14;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.lbm-canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.lbm-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.lbm-canvas-hidden {
+  visibility: hidden;
+}
+
+.lbm-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0e14;
+  z-index: 1;
+}
+
+.lbm-placeholder-inner {
+  text-align: center;
+  max-width: 320px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lbm-placeholder-inner strong {
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.lbm-placeholder-inner p {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.lbm-placeholder-inner .progress-bar {
+  width: 100%;
+}
+
+.lbm-placeholder-inner span {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+
+.lbm-title-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.lbm-grid-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.lbm-sidebar {
+  width: 300px;
+}
+
+.lbm-control-panel h2 {
+  font-size: 1rem;
+  text-transform: none;
+}
+
+.lbm-shapes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.lbm-shapes-header h4 {
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+}
+
+.lbm-shape-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  background: var(--bg);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.lbm-shape-card:hover,
+.lbm-shape-card.hovered {
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.lbm-shape-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.35);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.lbm-shape-card.selected:hover,
+.lbm-shape-card.selected.hovered {
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.lbm-shape-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.lbm-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.lbm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.lbm-field span {
+  font-family: inherit;
+}
+
+.lbm-field .num-input {
+  width: 100%;
+}
+
+.lbm-axis-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 0.35rem;
+}
+
+.lbm-prerender-status,
+.lbm-prerender-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.lbm-canvas-grab {
+  cursor: grab;
+}
+
+.lbm-canvas-dragging {
+  cursor: grabbing;
+}
+
+.lbm-drag-hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 0.35rem;
+  text-align: center;
+}
+
+.lbm-color-legend {
+  position: absolute;
+  right: 0.65rem;
+  bottom: 0.65rem;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+  padding: 0.5rem 0.6rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(10, 14, 20, 0.92);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  user-select: none;
+  width: 320px;
+  max-width: calc(100% - 1.3rem);
+}
+
+.lbm-legend-title {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.lbm-legend-canvas {
+  display: block;
+  width: 100%;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.lbm-legend-ticks {
+  position: relative;
+  height: 1rem;
+  margin-top: 0.1rem;
+}
+
+.lbm-legend-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 0.62rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lbm-legend-tick:first-child {
+  transform: translateX(0);
+}
+
+.lbm-legend-tick:last-child {
+  transform: translateX(-100%);
+}
+
+.lbm-legend-unit {
+  font-size: 0.6rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.lbm-panel-desc {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
+}
+
+.lbm-controls-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.lbm-controls-row .hf-run-btn {
+  flex: 1;
+  margin-top: 0;
+}
+
+.lbm-controls-row .shape-btn {
+  flex: 1;
+  margin-top: 0;
+}
+
 .regime-badge {
   position: absolute;
   top: 1rem;
@@ -104,6 +436,21 @@ body,
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.1em;
+  pointer-events: none;
+}
+
+.dev-notice-banner {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 10;
+  background: rgba(18, 24, 32, 0.9);
+  border: 1px solid rgba(255, 170, 68, 0.45);
+  color: var(--warn);
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
   pointer-events: none;
 }
 

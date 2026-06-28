@@ -17,6 +17,29 @@ export type WallThermalBC = 'adiabatic' | 'isothermal';
 
 export type SimMode = 'preview' | 'highFidelity';
 
+export type ViewMode = '3d' | 'lbm';
+
+export type LbmDisplayMode = 'velocity' | 'pressure';
+
+export type LbmRunMode = 'live' | 'prerender';
+
+export type LbmPrerenderStatus = 'idle' | 'running' | 'ready' | 'error' | 'cancelled';
+
+export type LbmShapeType = 'airfoil' | 'square' | 'circle';
+
+export interface LbmShapeInput {
+  id: string;
+  type: LbmShapeType;
+  cx: number;
+  cy: number;
+  aoa: number;
+  chord?: number;
+  naca?: string;
+  width?: number;
+  height?: number;
+  radius?: number;
+}
+
 export type SlicePlane = 'xy' | 'xz' | 'yz';
 
 export type TransitionState = 'laminar' | 'transitional' | 'turbulent';

@@ -137,6 +137,7 @@ export function WindTunnelScene() {
 
   return (
     <div className="scene-container">
+      <div className="dev-notice-banner">3D flow is still in development</div>
       <div className="regime-badge">{regime.toUpperCase()}</div>
       <Canvas
         shadows

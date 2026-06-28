@@ -1,10 +1,11 @@
-# Hypersonics Visualiser
+# Flow Visualiser
 
-A browser-based virtual wind tunnel for visualising hypersonic and supersonic flow effects on 3D shapes — Mach 0 to 10+.
+A browser-based flow visualiser — 2D Lattice Boltzmann CFD and an interactive 3D flow tunnel for shapes from subsonic to hypersonic (Mach 0–12+).
 
 ## Features
 
-- **Interactive wind tunnel** — place, move, and rotate shapes (sphere, cone, wedge, cylinder, flat plate, biconic, ogive)
+- **LBM CFD** — 2D Lattice Boltzmann wind tunnel (ported from `gem.py`) with jet colormap, velocity/pressure fields, and configurable obstacles
+- **Interactive 3D flow view** — place, move, and rotate shapes (sphere, cone, wedge, cylinder, flat plate, biconic, ogive)
 - **Mach 0–12** with altitude-linked atmosphere (ISA), Reynolds number, and regime detection
 - **Live preview physics** — regime-aware flow field, streamlines, shock surfaces, surface Cp/temperature coloring
 - **Aerodynamic metrics** — Cd, Cl, pressure drag, skin friction, wall temperature, multi-body interference estimate
@@ -36,13 +37,13 @@ Open http://localhost:5173
 
 ## GitHub Pages
 
-Pushes to `main` build with base path `/hypersonics-visualiser/` and deploy via GitHub Actions.
+Pushes to `main` build with base path `/flow-visualiser/` and deploy via GitHub Actions.
 
 1. Push this repo to GitHub.
 2. In the repo: **Settings → Pages → Build and deployment → Source** → select **GitHub Actions** (not “Deploy from a branch” and not `main`).
 3. Push to `main` — the [Deploy workflow](.github/workflows/deploy.yml) runs tests, builds, and publishes `dist/`.
 
-The site will be at **https://pyastreboff.github.io/hypersonics-visualiser/**
+The site will be at **https://pyastreboff.github.io/flow-visualiser/** (rename the GitHub repo to `flow-visualiser` for this URL to work).
 
 If you see a blank page, Pages is probably still deploying the `main` branch (which only has source files, not the built app). Switch the source to **GitHub Actions**.
 
@@ -50,10 +51,10 @@ To preview the Pages build locally:
 
 ```bash
 npm run build:pages
-npx vite preview --base /hypersonics-visualiser/ --port 4173
+npx vite preview --base /flow-visualiser/ --port 4173
 ```
 
-Then open http://localhost:4173/hypersonics-visualiser/
+Then open http://localhost:4173/flow-visualiser/
 
 To deploy manually: `npm run deploy` (pushes `dist/` to the `gh-pages` branch — only if you use branch-based Pages).
 
@@ -67,7 +68,8 @@ To deploy manually: `npm run deploy` (pushes `dist/` to the `gh-pages` branch �
 
 ## Controls
 
-- **Left panel** — add shapes, flow parameters, visualization toggles
-- **Right panel** — drag, lift, Reynolds, stagnation temperature
+- **Left panel** — flow parameters, shapes, and visualization toggles
+- **Right panel** (3D mode) — drag, lift, Reynolds, stagnation temperature
 - **3D view** — orbit (drag), select shape (click), move (TransformControls when selected)
+- **LBM CFD view** — `gem.py` inputs: wind speed, shapes list, playback time, display mode, resolution
 - **Run high-fidelity** — launches 2D Euler worker; enable slice plane to view results

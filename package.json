@@ -1,14 +1,14 @@
 {
-  "name": "hypersonics-visualiser",
+  "name": "flow-visualiser",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:pages": "VITE_BASE_PATH=/hypersonics-visualiser/ npm run build",
+    "build:pages": "VITE_BASE_PATH=/flow-visualiser/ npm run build",
     "preview": "vite preview",
-    "preview:pages": "npm run build:pages && vite preview --base /hypersonics-visualiser/",
+    "preview:pages": "npm run build:pages && vite preview --base /flow-visualiser/",
     "deploy": "npm run build:pages && gh-pages -d dist --dotfiles",
     "test": "vitest run",
     "test:watch": "vitest"

@@ -3,13 +3,20 @@ import type {
   CombinedMetrics,
   FlowParams,
   HFRunState,
+  LbmDisplayMode,
+  LbmPrerenderStatus,
+  LbmRunMode,
+  LbmShapeInput,
   PlacedShape,
   ShapeKind,
   SimMode,
   SlicePlane,
+  ViewMode,
 } from '@/types';
 import { getShapeDefinition } from '@/shapes/definitions';
 import { computeAllMetrics } from '@/physics/drag';
+import { defaultLbmShapes } from '@/physics/lbmObstacles';
+import { lbmFrameToTime, clampTunnelNx, clampTunnelNy, snapLbmResolutionScale } from '@/physics/lbmConfig';
 
 let shapeIdCounter = 0;
 
@@ -40,6 +47,7 @@ interface SimState {
   shapes: PlacedShape[];
   selectedShapeId: string | null;
   simMode: SimMode;
+  viewMode: ViewMode;
   metrics: CombinedMetrics | null;
   showStreamlines: boolean;
   showShocks: boolean;
@@ -50,6 +58,23 @@ interface SimState {
   showBoundaryLayer: boolean;
   hfState: HFRunState;
   hfWorker: Worker | null;
+  lbmDisplayMode: LbmDisplayMode;
+  lbmWindSpeed: number;
+  lbmResolutionScale: number;
+  lbmTunnelNx: number;
+  lbmTunnelNy: number;
+  lbmPlaybackSeconds: number;
+  lbmShapes: LbmShapeInput[];
+  selectedLbmShapeId: string | null;
+  hoveredLbmShapeId: string | null;
+  lbmPlaying: boolean;
+  lbmElapsedSec: number;
+  lbmFrameIndex: number;
+  lbmSeed: number;
+  lbmRunMode: LbmRunMode;
+  lbmPrerenderStatus: LbmPrerenderStatus;
+  lbmPrerenderProgress: number;
+  lbmRewind: number;
 
   setFlowParam: <K extends keyof FlowParams>(key: K, value: FlowParams[K]) => void;
   addShape: (kind: ShapeKind) => void;
@@ -65,6 +90,7 @@ interface SimState {
   addCustomShape: (name: string, geometryUrl: string) => void;
   recomputeMetrics: () => void;
   setSimMode: (mode: SimMode) => void;
+  setViewMode: (mode: ViewMode) => void;
   toggleStreamlines: () => void;
   toggleShocks: () => void;
   toggleSlice: () => void;
@@ -72,6 +98,31 @@ interface SimState {
   setSliceField: (field: 'density' | 'temperature' | 'mach') => void;
   toggleTransition: () => void;
   toggleBoundaryLayer: () => void;
+  setLbmDisplayMode: (mode: LbmDisplayMode) => void;
+  setLbmWindSpeed: (speed: number) => void;
+  setLbmResolutionScale: (scale: number) => void;
+  setLbmTunnelNx: (nx: number) => void;
+  setLbmTunnelNy: (ny: number) => void;
+  setLbmPlaybackSeconds: (seconds: number) => void;
+  setLbmElapsedSec: (seconds: number) => void;
+  setLbmFrameIndex: (frame: number) => void;
+  updateLbmShape: (id: string, shape: LbmShapeInput) => void;
+  updateLbmShapePosition: (id: string, cx: number, cy: number) => void;
+  commitLbmShapeLayout: () => void;
+  setSelectedLbmShapeId: (id: string | null) => void;
+  setHoveredLbmShapeId: (id: string | null) => void;
+  addLbmShape: (shape: LbmShapeInput) => void;
+  removeLbmShape: (id: string) => void;
+  setLbmRunMode: (mode: LbmRunMode) => void;
+  setLbmPrerenderState: (
+    state: Partial<{
+      status: LbmPrerenderStatus;
+      progress: number;
+    }>,
+  ) => void;
+  setLbmPlaying: (playing: boolean) => void;
+  toggleLbmPlaying: () => void;
+  resetLbmSimulation: () => void;
   runHighFidelity: () => void;
   cancelHighFidelity: () => void;
   setHFState: (state: Partial<HFRunState>) => void;
@@ -82,6 +133,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   shapes: [],
   selectedShapeId: null,
   simMode: 'preview',
+  viewMode: 'lbm',
   metrics: null,
   showStreamlines: true,
   showShocks: true,
@@ -92,6 +144,23 @@ export const useSimStore = create<SimState>((set, get) => ({
   showBoundaryLayer: false,
   hfState: defaultHFState(),
   hfWorker: null,
+  lbmDisplayMode: 'velocity',
+  lbmWindSpeed: 0.13,
+  lbmResolutionScale: 1,
+  lbmTunnelNx: 300,
+  lbmTunnelNy: 100,
+  lbmPlaybackSeconds: 6,
+  lbmShapes: defaultLbmShapes(),
+  selectedLbmShapeId: null,
+  hoveredLbmShapeId: null,
+  lbmPlaying: false,
+  lbmElapsedSec: 0,
+  lbmFrameIndex: 0,
+  lbmSeed: 0,
+  lbmRunMode: 'prerender',
+  lbmPrerenderStatus: 'idle',
+  lbmPrerenderProgress: 0,
+  lbmRewind: 0,
 
   setFlowParam: (key, value) => {
     set((s) => {
@@ -181,6 +250,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   },
 
   setSimMode: (mode) => set({ simMode: mode }),
+  setViewMode: (mode) => set({ viewMode: mode }),
   toggleStreamlines: () => set((s) => ({ showStreamlines: !s.showStreamlines })),
   toggleShocks: () => set((s) => ({ showShocks: !s.showShocks })),
   toggleSlice: () => set((s) => ({ showSlice: !s.showSlice })),
@@ -188,6 +258,98 @@ export const useSimStore = create<SimState>((set, get) => ({
   setSliceField: (field) => set({ sliceField: field }),
   toggleTransition: () => set((s) => ({ showTransition: !s.showTransition })),
   toggleBoundaryLayer: () => set((s) => ({ showBoundaryLayer: !s.showBoundaryLayer })),
+  setLbmDisplayMode: (mode) => set({ lbmDisplayMode: mode }),
+  setLbmWindSpeed: (speed) =>
+    set({
+      lbmWindSpeed: Math.min(0.15, Math.max(0.05, speed)),
+      lbmPrerenderStatus: get().lbmRunMode === 'prerender' ? 'idle' : get().lbmPrerenderStatus,
+    }),
+  setLbmResolutionScale: (scale) => {
+    set({
+      lbmResolutionScale: snapLbmResolutionScale(scale),
+      lbmPrerenderStatus: get().lbmRunMode === 'prerender' ? 'idle' : get().lbmPrerenderStatus,
+    });
+  },
+  setLbmTunnelNx: (nx) => {
+    set({
+      lbmTunnelNx: clampTunnelNx(nx),
+      lbmPrerenderStatus: get().lbmRunMode === 'prerender' ? 'idle' : get().lbmPrerenderStatus,
+    });
+  },
+  setLbmTunnelNy: (ny) => {
+    set({
+      lbmTunnelNy: clampTunnelNy(ny),
+      lbmPrerenderStatus: get().lbmRunMode === 'prerender' ? 'idle' : get().lbmPrerenderStatus,
+    });
+  },
+  setLbmPlaybackSeconds: (seconds) =>
+    set({
+      lbmPlaybackSeconds: Math.min(60, Math.max(1, seconds)),
+      lbmPrerenderStatus: get().lbmRunMode === 'prerender' ? 'idle' : get().lbmPrerenderStatus,
+    }),
+  setLbmElapsedSec: (seconds) => set({ lbmElapsedSec: seconds }),
+  setLbmFrameIndex: (frame) =>
+    set({ lbmFrameIndex: frame, lbmElapsedSec: lbmFrameToTime(frame) }),
+  updateLbmShape: (id, shape) =>
+    set((s) => ({
+      lbmShapes: s.lbmShapes.map((sh) => (sh.id === id ? shape : sh)),
+      lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+    })),
+  updateLbmShapePosition: (id, cx, cy) =>
+    set((s) => ({
+      lbmShapes: s.lbmShapes.map((sh) =>
+        sh.id === id ? { ...sh, cx: Math.round(cx), cy: Math.round(cy) } : sh,
+      ),
+    })),
+  commitLbmShapeLayout: () =>
+    set((s) => ({
+      lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+    })),
+  setSelectedLbmShapeId: (id) => set({ selectedLbmShapeId: id }),
+  setHoveredLbmShapeId: (id) => set({ hoveredLbmShapeId: id }),
+  addLbmShape: (shape) =>
+    set((s) => ({
+      lbmShapes: [...s.lbmShapes, shape],
+      lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+    })),
+  removeLbmShape: (id) =>
+    set((s) => ({
+      lbmShapes: s.lbmShapes.filter((sh) => sh.id !== id),
+      selectedLbmShapeId: s.selectedLbmShapeId === id ? null : s.selectedLbmShapeId,
+      lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+    })),
+  setLbmRunMode: (mode) =>
+    set({
+      lbmRunMode: mode,
+      lbmPrerenderStatus: mode === 'prerender' ? 'idle' : 'idle',
+      lbmPrerenderProgress: 0,
+      lbmPlaying: mode === 'live',
+    }),
+  setLbmPrerenderState: (state) =>
+    set((s) => ({
+      lbmPrerenderStatus: state.status ?? s.lbmPrerenderStatus,
+      lbmPrerenderProgress: state.progress ?? s.lbmPrerenderProgress,
+    })),
+  toggleLbmPlaying: () => set((s) => ({ lbmPlaying: !s.lbmPlaying })),
+  setLbmPlaying: (playing) => set({ lbmPlaying: playing }),
+  resetLbmSimulation: () =>
+    set((s) => {
+      if (s.lbmRunMode === 'prerender' && s.lbmPrerenderStatus === 'ready') {
+        return {
+          lbmPlaying: true,
+          lbmFrameIndex: 0,
+          lbmElapsedSec: 0,
+          lbmRewind: s.lbmRewind + 1,
+        };
+      }
+      return {
+        lbmPlaying: s.lbmRunMode === 'live',
+        lbmFrameIndex: 0,
+        lbmElapsedSec: 0,
+        lbmSeed: s.lbmSeed + 1,
+        lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+      };
+    }),
 
   runHighFidelity: () => {
     const { hfWorker, flowParams, shapes, hfState } = get();

@@ -110,7 +110,7 @@ export class LbmSolver {
   }
 
   updateWindSpeed(speed: number): void {
-    if (!Number.isFinite(speed) || speed <= 0) return;
+    if (!Number.isFinite(speed) || speed < 0) return;
     this.windSpeed = speed;
     for (let idx = 0; idx < this.displayUx.length; idx++) {
       if (!this.obstacle[idx]) {

@@ -12,18 +12,30 @@ export default function App() {
   const setViewMode = useSimStore((s) => s.setViewMode);
 
   useEffect(() => {
-    const isFormField = (target: EventTarget | null): boolean =>
-      target instanceof HTMLInputElement ||
-      target instanceof HTMLTextAreaElement ||
-      target instanceof HTMLSelectElement ||
-      (target instanceof HTMLElement && target.isContentEditable);
+    const blocksDeleteShortcut = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false;
+      if (target.isContentEditable) return true;
+      if (target instanceof HTMLTextAreaElement) return true;
+      if (target instanceof HTMLSelectElement) return true;
+      if (target instanceof HTMLInputElement) {
+        const type = target.type;
+        return (
+          type === 'text' ||
+          type === 'number' ||
+          type === 'search' ||
+          type === 'password' ||
+          type === 'email' ||
+          type === 'url'
+        );
+      }
+      return false;
+    };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isFormField(e.target)) return;
-
       const state = useSimStore.getState();
 
       if (e.code === 'Space') {
+        if (blocksDeleteShortcut(e.target)) return;
         if (state.viewMode !== 'lbm') return;
         if (state.lbmRunMode === 'prerender' && state.lbmPrerenderStatus !== 'ready') return;
         e.preventDefault();
@@ -31,12 +43,18 @@ export default function App() {
         return;
       }
 
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (e.code !== 'Delete' && e.code !== 'Backspace') return;
+
+      if (blocksDeleteShortcut(e.target)) return;
 
       if (state.viewMode === 'lbm') {
-        if (!state.selectedLbmShapeId) return;
+        const shapeId = state.selectedLbmShapeId ?? state.hoveredLbmShapeId;
+        if (!shapeId) return;
         e.preventDefault();
-        state.removeLbmShape(state.selectedLbmShapeId);
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+        state.removeLbmShape(shapeId);
         return;
       }
 
@@ -56,7 +74,7 @@ export default function App() {
           <div>
             <h1>Flow Visualiser</h1>
             <p className="subtitle">
-              by Peter Yastreboff — interactive flow visualisation
+              by Peter Yastreboff — interactive CFD and hypersonic flow visualisation
             </p>
           </div>
           <div className="view-toggle">
@@ -87,7 +105,7 @@ export default function App() {
             </>
           )}
         </aside>
-        <main className="main-view">
+        <main className="main-view" id="main-content" aria-label="Flow simulation viewport">
           {viewMode === 'lbm' ? <LbmTunnelView /> : <WindTunnelScene />}
         </main>
         {viewMode === '3d' && (

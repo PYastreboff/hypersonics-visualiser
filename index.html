@@ -2,12 +2,85 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="theme-color" content="#0a0e14" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Flow Visualiser — Peter Yastreboff</title>
+    <meta name="theme-color" content="#0a0e14" />
+    <meta name="color-scheme" content="dark" />
+
+    <title>Flow Visualiser — Interactive CFD &amp; Hypersonic Flow</title>
+    <meta
+      name="description"
+      content="Browser-based flow visualiser by Peter Yastreboff. 2D Lattice Boltzmann wind tunnel CFD, velocity and pressure fields, plus interactive 3D hypersonic flow from Mach 0 to 12+."
+    />
+    <meta
+      name="keywords"
+      content="CFD, flow visualisation, Lattice Boltzmann, LBM, hypersonic, aerodynamics, wind tunnel, fluid dynamics, compressible flow, Peter Yastreboff"
+    />
+    <meta name="author" content="Peter Yastreboff" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="%SITE_URL%/" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Flow Visualiser" />
+    <meta property="og:title" content="Flow Visualiser — Interactive CFD &amp; Hypersonic Flow" />
+    <meta
+      property="og:description"
+      content="Explore 2D Lattice Boltzmann CFD and interactive 3D hypersonic flow. Velocity, pressure, shocks, and aerodynamic metrics in your browser."
+    />
+    <meta property="og:url" content="%SITE_URL%/" />
+    <meta property="og:image" content="%SITE_URL%/og-image.svg" />
+    <meta property="og:image:alt" content="Flow Visualiser — CFD and hypersonic flow simulation preview" />
+    <meta property="og:locale" content="en_GB" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Flow Visualiser — Interactive CFD &amp; Hypersonic Flow" />
+    <meta
+      name="twitter:description"
+      content="2D Lattice Boltzmann wind tunnel and 3D hypersonic flow visualisation in the browser."
+    />
+    <meta name="twitter:image" content="%SITE_URL%/og-image.svg" />
+    <meta name="twitter:image:alt" content="Flow Visualiser — CFD and hypersonic flow simulation preview" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Flow Visualiser",
+        "description": "Interactive browser-based CFD visualiser with 2D Lattice Boltzmann wind tunnel simulation and 3D hypersonic flow exploration.",
+        "url": "%SITE_URL%/",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Web browser",
+        "browserRequirements": "Requires JavaScript",
+        "author": {
+          "@type": "Person",
+          "name": "Peter Yastreboff"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "2D Lattice Boltzmann CFD wind tunnel",
+          "Velocity and pressure field visualisation",
+          "Interactive 3D hypersonic flow (Mach 0–12+)",
+          "Aerodynamic drag and lift metrics",
+          "Custom obstacle shapes and STL import"
+        ]
+      }
+    </script>
   </head>
   <body>
+    <noscript>
+      <h1>Flow Visualiser</h1>
+      <p>
+        Interactive CFD and hypersonic flow visualisation by Peter Yastreboff. This app requires
+        JavaScript — enable it to run the 2D Lattice Boltzmann solver and 3D flow tunnel.
+      </p>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

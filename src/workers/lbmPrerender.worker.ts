@@ -1,8 +1,8 @@
-import { prerenderLbm } from '../physics/lbmPrerender';
+import { prerenderLbmAuto } from '../physics/lbmGpuPrerender';
 
 let cancelled = false;
 
-self.onmessage = (e: MessageEvent) => {
+self.onmessage = async (e: MessageEvent) => {
   if (e.data.type === 'cancel') {
     cancelled = true;
     return;
@@ -13,7 +13,7 @@ self.onmessage = (e: MessageEvent) => {
     const { nx, ny, windSpeed, fluidDensity, renderStep, playbackSeconds, obstacle } = e.data;
 
     try {
-      const result = prerenderLbm(
+      const { result, backend: completedBackend } = await prerenderLbmAuto(
         {
           nx,
           ny,
@@ -23,8 +23,8 @@ self.onmessage = (e: MessageEvent) => {
           playbackSeconds,
           obstacle: new Uint8Array(obstacle),
         },
-        (progress: number) => {
-          self.postMessage({ type: 'progress', progress });
+        (progress: number, renderBackend: 'gpu' | 'cpu') => {
+          self.postMessage({ type: 'progress', progress, backend: renderBackend });
         },
         () => cancelled,
       );
@@ -42,6 +42,7 @@ self.onmessage = (e: MessageEvent) => {
           totalFrames: result.totalFrames,
           nx: result.nx,
           ny: result.ny,
+          backend: completedBackend,
         },
         {
           transfer: [result.velocityFrames.buffer, result.pressureFrames.buffer],

@@ -1,0 +1,18 @@
+{
+  "name": "Flow Visualiser",
+  "short_name": "Flow Viz",
+  "description": "Interactive CFD and hypersonic flow visualisation in the browser.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0a0e14",
+  "theme_color": "#0a0e14",
+  "lang": "en-GB",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

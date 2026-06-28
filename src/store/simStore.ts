@@ -6,7 +6,9 @@ import type {
   LbmDisplayMode,
   LbmDrawDensity,
   LbmInteractionMode,
+  LbmPhysicsMode,
   LbmPrerenderStatus,
+  EulerTunnelStatus,
   LbmRunMode,
   LbmShapeInput,
   PlacedShape,
@@ -23,7 +25,7 @@ import {
   stencilArraysFromKeys,
   stencilKeysFromShape,
 } from '@/physics/lbmDrawBrush';
-import { lbmFrameToTime, lbmTotalFrames, clampLbmFluidDensity, clampTunnelNx, clampTunnelNy, snapLbmResolutionScale } from '@/physics/lbmConfig';
+import { lbmFrameToTime, lbmTotalFrames, clampLbmFluidDensity, clampEulerMach, clampTunnelNx, clampTunnelNy, snapLbmResolutionScale } from '@/physics/lbmConfig';
 
 let shapeIdCounter = 0;
 
@@ -65,9 +67,15 @@ interface SimState {
   showBoundaryLayer: boolean;
   hfState: HFRunState;
   hfWorker: Worker | null;
+  lbmPhysicsMode: LbmPhysicsMode;
   lbmDisplayMode: LbmDisplayMode;
   lbmWindSpeed: number;
   lbmFluidDensity: number;
+  lbmEulerMach: number;
+  lbmEulerAltitude: number;
+  eulerTunnelStatus: EulerTunnelStatus;
+  eulerTunnelProgress: number;
+  eulerTunnelSeed: number;
   lbmResolutionScale: number;
   lbmTunnelNx: number;
   lbmTunnelNy: number;
@@ -110,6 +118,16 @@ interface SimState {
   toggleTransition: () => void;
   toggleBoundaryLayer: () => void;
   setLbmDisplayMode: (mode: LbmDisplayMode) => void;
+  setLbmPhysicsMode: (mode: LbmPhysicsMode) => void;
+  setLbmEulerMach: (mach: number) => void;
+  setLbmEulerAltitude: (altitude: number) => void;
+  setEulerTunnelState: (
+    state: Partial<{
+      status: EulerTunnelStatus;
+      progress: number;
+    }>,
+  ) => void;
+  runEulerTunnelSimulation: () => void;
   setLbmWindSpeed: (speed: number) => void;
   setLbmFluidDensity: (density: number) => void;
   setLbmResolutionScale: (scale: number) => void;
@@ -162,9 +180,15 @@ export const useSimStore = create<SimState>((set, get) => ({
   showBoundaryLayer: false,
   hfState: defaultHFState(),
   hfWorker: null,
+  lbmPhysicsMode: 'lbm',
   lbmDisplayMode: 'velocity',
-  lbmWindSpeed: 0.13,
+  lbmWindSpeed: 0.1,
   lbmFluidDensity: 1,
+  lbmEulerMach: 0.3,
+  lbmEulerAltitude: 0,
+  eulerTunnelStatus: 'idle',
+  eulerTunnelProgress: 0,
+  eulerTunnelSeed: 0,
   lbmResolutionScale: 1,
   lbmTunnelNx: 300,
   lbmTunnelNy: 100,
@@ -281,27 +305,67 @@ export const useSimStore = create<SimState>((set, get) => ({
   toggleTransition: () => set((s) => ({ showTransition: !s.showTransition })),
   toggleBoundaryLayer: () => set((s) => ({ showBoundaryLayer: !s.showBoundaryLayer })),
   setLbmDisplayMode: (mode) => set({ lbmDisplayMode: mode }),
+  setLbmPhysicsMode: (mode) =>
+    set((s) => ({
+      lbmPhysicsMode: mode,
+      lbmDisplayMode:
+        mode === 'euler' && s.lbmDisplayMode === 'velocity'
+          ? 'mach'
+          : mode === 'lbm' && s.lbmDisplayMode === 'mach'
+            ? 'velocity'
+            : s.lbmDisplayMode,
+      eulerTunnelStatus: mode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: mode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
+    })),
+  setLbmEulerMach: (mach) =>
+    set((s) => ({
+      lbmEulerMach: clampEulerMach(mach),
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
+    })),
+  setLbmEulerAltitude: (altitude) =>
+    set((s) => ({
+      lbmEulerAltitude: Math.min(50000, Math.max(0, altitude)),
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
+    })),
+  setEulerTunnelState: (state) =>
+    set((s) => ({
+      eulerTunnelStatus: state.status ?? s.eulerTunnelStatus,
+      eulerTunnelProgress: state.progress ?? s.eulerTunnelProgress,
+    })),
+  runEulerTunnelSimulation: () =>
+    set((s) => ({
+      eulerTunnelSeed: s.eulerTunnelSeed + 1,
+      eulerTunnelStatus: 'idle',
+    })),
   setLbmWindSpeed: (speed) =>
-    set({ lbmWindSpeed: Math.min(0.15, Math.max(0.05, speed)) }),
+    set({ lbmWindSpeed: Math.min(0.15, Math.max(0, speed)) }),
   setLbmFluidDensity: (density) =>
     set({ lbmFluidDensity: clampLbmFluidDensity(density) }),
   setLbmResolutionScale: (scale) => {
-    set({
+    set((s) => ({
       lbmResolutionScale: snapLbmResolutionScale(scale),
-      lbmPrerenderStatus: get().lbmRunMode === 'prerender' ? 'idle' : get().lbmPrerenderStatus,
-    });
+      lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
+    }));
   },
   setLbmTunnelNx: (nx) => {
-    set({
+    set((s) => ({
       lbmTunnelNx: clampTunnelNx(nx),
-      lbmPrerenderStatus: get().lbmRunMode === 'prerender' ? 'idle' : get().lbmPrerenderStatus,
-    });
+      lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
+    }));
   },
   setLbmTunnelNy: (ny) => {
-    set({
+    set((s) => ({
       lbmTunnelNy: clampTunnelNy(ny),
-      lbmPrerenderStatus: get().lbmRunMode === 'prerender' ? 'idle' : get().lbmPrerenderStatus,
-    });
+      lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
+    }));
   },
   setLbmPlaybackSeconds: (seconds) =>
     set({
@@ -325,6 +389,11 @@ export const useSimStore = create<SimState>((set, get) => ({
     set((s) => ({
       lbmShapes: s.lbmShapes.map((sh) => (sh.id === id ? shape : sh)),
       lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+      lbmSeed:
+        s.lbmPhysicsMode === 'lbm' && s.lbmRunMode === 'prerender'
+          ? s.lbmSeed + 1
+          : s.lbmSeed,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
     })),
   updateLbmShapePosition: (id, cx, cy) =>
     set((s) => ({
@@ -365,6 +434,12 @@ export const useSimStore = create<SimState>((set, get) => ({
   commitLbmShapeLayout: () =>
     set((s) => ({
       lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+      lbmSeed:
+        s.lbmPhysicsMode === 'lbm' && s.lbmRunMode === 'prerender'
+          ? s.lbmSeed + 1
+          : s.lbmSeed,
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
     })),
   setSelectedLbmShapeId: (id) => set({ selectedLbmShapeId: id }),
   setHoveredLbmShapeId: (id) => set({ hoveredLbmShapeId: id }),
@@ -372,12 +447,19 @@ export const useSimStore = create<SimState>((set, get) => ({
     set((s) => ({
       lbmShapes: [...s.lbmShapes, shape],
       lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
     })),
   removeLbmShape: (id) =>
     set((s) => ({
       lbmShapes: s.lbmShapes.filter((sh) => sh.id !== id),
       selectedLbmShapeId: s.selectedLbmShapeId === id ? null : s.selectedLbmShapeId,
+      hoveredLbmShapeId: s.hoveredLbmShapeId === id ? null : s.hoveredLbmShapeId,
       lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+      lbmPrerenderProgress: s.lbmRunMode === 'prerender' ? 0 : s.lbmPrerenderProgress,
+      lbmSeed: s.lbmPhysicsMode === 'lbm' ? s.lbmSeed + 1 : s.lbmSeed,
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
     })),
   setLbmRunMode: (mode) =>
     set({
@@ -399,20 +481,27 @@ export const useSimStore = create<SimState>((set, get) => ({
   setLbmDrawDensity: (density) => set({ lbmDrawDensity: density }),
   resetLbmSimulation: () =>
     set((s) => {
-      if (s.lbmRunMode === 'prerender' && s.lbmPrerenderStatus === 'ready') {
+      if (s.lbmPhysicsMode === 'euler') {
         return {
-          lbmPlaying: true,
+          eulerTunnelSeed: s.eulerTunnelSeed + 1,
+          eulerTunnelStatus: 'idle',
+        };
+      }
+      if (s.lbmRunMode === 'prerender') {
+        return {
+          lbmPlaying: false,
           lbmFrameIndex: 0,
           lbmElapsedSec: 0,
-          lbmRewind: s.lbmRewind + 1,
+          lbmSeed: s.lbmSeed + 1,
+          lbmPrerenderStatus: 'idle',
+          lbmPrerenderProgress: 0,
         };
       }
       return {
-        lbmPlaying: s.lbmRunMode === 'live',
+        lbmPlaying: true,
         lbmFrameIndex: 0,
         lbmElapsedSec: 0,
         lbmSeed: s.lbmSeed + 1,
-        lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
       };
     }),
 

@@ -120,8 +120,10 @@ body,
 
 .main-view {
   flex: 1;
-  position: relative;
-  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .scene-container {
@@ -135,17 +137,33 @@ body,
 }
 
 .lbm-container {
-  width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: #0a0e14;
   padding: 0.75rem 1rem 1rem;
 }
 
-.lbm-canvas-wrap {
-  flex: 1;
+.lbm-title-bar,
+.lbm-scrubber,
+.lbm-color-legend,
+.lbm-drag-hint {
+  flex-shrink: 0;
+}
+
+.lbm-stage {
+  flex: 1 1 0;
   min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lbm-canvas-wrap {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
   position: relative;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -276,6 +294,17 @@ body,
   margin-top: 0.15rem;
 }
 
+.lbm-euler-disclaimer {
+  font-size: 0.68rem;
+  color: #c9a227;
+  line-height: 1.4;
+  margin: 0.35rem 0 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  background: rgba(201, 162, 39, 0.1);
+  border: 1px solid rgba(201, 162, 39, 0.25);
+}
+
 .lbm-shapes-header h4 {
   font-size: 0.8rem;
   font-family: ui-monospace, monospace;
@@ -338,14 +367,6 @@ body,
 
 .lbm-field .num-input {
   width: 100%;
-}
-
-.lbm-axis-labels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.75rem;
-  color: var(--muted);
-  margin-top: 0.35rem;
 }
 
 .lbm-prerender-status,

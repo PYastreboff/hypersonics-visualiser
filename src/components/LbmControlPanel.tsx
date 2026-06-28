@@ -13,7 +13,11 @@ import {
   LBM_MIN_FLUID_DENSITY,
   LBM_MAX_FLUID_DENSITY,
   LBM_FLUID_DENSITY_STEP,
+  EULER_MIN_MACH,
+  EULER_MAX_MACH,
+  eulerFreestreamSpeed,
 } from '@/physics/lbmConfig';
+import { detectRegime, regimeLabel } from '@/physics/regimes';
 import { nextLbmShapeId } from '@/physics/lbmObstacles';
 import { SettingLabel } from './SettingLabel';
 import { NumInput } from './NumInput';
@@ -22,6 +26,7 @@ function NumField({
   label,
   value,
   onChange,
+  onCommit,
   min,
   max,
   step = 1,
@@ -29,6 +34,7 @@ function NumField({
   label: string;
   value: number;
   onChange: (v: number) => void;
+  onCommit?: () => void;
   min?: number;
   max?: number;
   step?: number;
@@ -36,7 +42,14 @@ function NumField({
   return (
     <label className="lbm-field">
       <span>{label}</span>
-      <NumInput value={value} onChange={onChange} min={min} max={max} step={step} />
+      <NumInput
+        value={value}
+        onChange={onChange}
+        onCommit={onCommit}
+        min={min}
+        max={max}
+        step={step}
+      />
     </label>
   );
 }
@@ -47,16 +60,22 @@ function ShapeCard({
   selected,
   hovered,
   onChange,
+  onMove,
+  onMoveCommit,
   onRemove,
   onHover,
+  onSelect,
 }: {
   shape: LbmShapeInput;
   index: number;
   selected: boolean;
   hovered: boolean;
   onChange: (shape: LbmShapeInput) => void;
+  onMove: (id: string, cx: number, cy: number) => void;
+  onMoveCommit: () => void;
   onRemove: () => void;
   onHover: (hovered: boolean) => void;
+  onSelect: () => void;
 }) {
   const setType = (type: LbmShapeType) => {
     if (type === 'custom') return;
@@ -67,6 +86,9 @@ function ShapeCard({
     } else if (type === 'square') {
       next.width = shape.width ?? 20;
       next.height = shape.height ?? 20;
+    } else if (type === 'doubleWedge') {
+      next.width = shape.width ?? 60;
+      next.height = shape.height ?? 24;
     } else {
       next.radius = shape.radius ?? 12;
     }
@@ -88,12 +110,31 @@ function ShapeCard({
         .join(' ')}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
+      onClick={(e) => {
+        const target = e.target;
+        if (
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLSelectElement ||
+          target instanceof HTMLButtonElement
+        ) {
+          return;
+        }
+        onSelect();
+      }}
     >
       <div className="lbm-shape-card-header">
         <strong>
           {shape.type === 'custom' && shape.name ? shape.name : `Shape ${index + 1}`}
         </strong>
-        <button type="button" className="remove-btn" onClick={onRemove} title="Remove shape">
+        <button
+          type="button"
+          className="remove-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          title="Remove shape"
+        >
           ×
         </button>
       </div>
@@ -107,6 +148,7 @@ function ShapeCard({
           <option value="airfoil">Airfoil</option>
           <option value="square">Square</option>
           <option value="circle">Circle</option>
+          <option value="doubleWedge">Double wedge</option>
           {shape.type === 'custom' && (
             <option value="custom">
               {shape.customSource === 'drawn' ? 'Drawn' : 'Custom'}
@@ -119,12 +161,14 @@ function ShapeCard({
         <NumField
           label="X position"
           value={shape.cx}
-          onChange={(cx) => onChange({ ...shape, cx })}
+          onChange={(cx) => onMove(shape.id, cx, shape.cy)}
+          onCommit={onMoveCommit}
         />
         <NumField
           label="Y position"
           value={shape.cy}
-          onChange={(cy) => onChange({ ...shape, cy })}
+          onChange={(cy) => onMove(shape.id, shape.cx, cy)}
+          onCommit={onMoveCommit}
         />
         <NumField
           label="Angle of attack (°)"
@@ -171,6 +215,23 @@ function ShapeCard({
         </div>
       )}
 
+      {shape.type === 'doubleWedge' && (
+        <div className="lbm-field-grid">
+          <NumField
+            label="Length"
+            value={shape.width ?? 60}
+            onChange={(width) => onChange({ ...shape, width })}
+            min={1}
+          />
+          <NumField
+            label="Thickness"
+            value={shape.height ?? 24}
+            onChange={(height) => onChange({ ...shape, height })}
+            min={1}
+          />
+        </div>
+      )}
+
       {shape.type === 'circle' && (
         <NumField
           label="Radius"
@@ -205,8 +266,11 @@ function ShapeCard({
 
 export function LbmControlPanel() {
   const {
+    lbmPhysicsMode,
     lbmWindSpeed,
     lbmFluidDensity,
+    lbmEulerMach,
+    lbmEulerAltitude,
     lbmShapes,
     lbmPlaybackSeconds,
     lbmDisplayMode,
@@ -216,13 +280,18 @@ export function LbmControlPanel() {
     lbmPlaying,
     lbmRunMode,
     lbmPrerenderStatus,
+    eulerTunnelStatus,
+    eulerTunnelProgress,
     lbmInteractionMode,
     lbmBrushRadius,
     lbmDrawDensity,
     selectedLbmShapeId,
     hoveredLbmShapeId,
+    setLbmPhysicsMode,
     setLbmWindSpeed,
     setLbmFluidDensity,
+    setLbmEulerMach,
+    setLbmEulerAltitude,
     setLbmPlaybackSeconds,
     setLbmDisplayMode,
     setLbmResolutionScale,
@@ -230,15 +299,22 @@ export function LbmControlPanel() {
     setLbmTunnelNy,
     setLbmRunMode,
     updateLbmShape,
+    updateLbmShapePosition,
+    commitLbmShapeLayout,
     addLbmShape,
     removeLbmShape,
     toggleLbmPlaying,
     resetLbmSimulation,
+    runEulerTunnelSimulation,
     setHoveredLbmShapeId,
     setLbmInteractionMode,
     setLbmBrushRadius,
     setLbmDrawDensity,
+    setSelectedLbmShapeId,
   } = useSimStore();
+
+  const isEuler = lbmPhysicsMode === 'euler';
+  const eulerU0 = eulerFreestreamSpeed(lbmEulerMach, lbmEulerAltitude);
 
   const effectiveGrid = lbmGridSize(lbmTunnelNx, lbmTunnelNy, lbmResolutionScale);
 
@@ -260,33 +336,93 @@ export function LbmControlPanel() {
       <p className="lbm-panel-desc">Flow, tunnel size, quality, and obstacles.</p>
 
       <div className="control-group">
-        <h4>Flow</h4>
+        <h4>Solver</h4>
 
         <SettingLabel
-          label="Wind speed (m/s)"
-          tip="Inlet flow speed in metres per second (typical range 0.05–0.15 m/s)"
+          label="Physics mode"
+          tip="LBM for low-speed lattice flow. Euler 2D for compressible inviscid flow at real Mach numbers."
         >
-          <input
-            type="range"
-            min={0.05}
-            max={0.15}
-            step={0.01}
-            value={lbmWindSpeed}
-            onChange={(e) => setLbmWindSpeed(parseFloat(e.target.value))}
-          />
-          <span className="value">{formatLbmSpeedMs(lbmWindSpeed)}</span>
+          <select
+            value={lbmPhysicsMode}
+            onChange={(e) => setLbmPhysicsMode(e.target.value as 'lbm' | 'euler')}
+          >
+            <option value="lbm">LBM (low Ma)</option>
+            <option value="euler">Euler 2D (compressible)</option>
+          </select>
         </SettingLabel>
+
+        {isEuler && (
+          <p className="lbm-euler-disclaimer">
+            Inviscid Euler — educational. No viscosity, boundary layers, or real-gas effects.
+            Mach 0–12 (subsonic through hypersonic). Use Mach or Pressure view for shocks (Ma &gt; 1).
+          </p>
+        )}
+      </div>
+
+      <div className="control-group">
+        <h4>Flow</h4>
+
+        {!isEuler && (
+          <SettingLabel
+            label="Wind speed (m/s)"
+            tip="Inlet flow speed in metres per second (0 = stagnant, typical max ~0.15 m/s)"
+          >
+            <input
+              type="range"
+              min={0}
+              max={0.15}
+              step={0.01}
+              value={lbmWindSpeed}
+              onChange={(e) => setLbmWindSpeed(parseFloat(e.target.value))}
+            />
+            <span className="value">{formatLbmSpeedMs(lbmWindSpeed)}</span>
+          </SettingLabel>
+        )}
+
+        {isEuler && (
+          <>
+            <SettingLabel
+              label="Mach number"
+              tip={`Freestream Mach number for the compressible Euler inlet (${EULER_MIN_MACH}–${EULER_MAX_MACH}, subsonic to hypersonic)`}
+            >
+              <input
+                type="range"
+                min={EULER_MIN_MACH}
+                max={EULER_MAX_MACH}
+                step={0.05}
+                value={lbmEulerMach}
+                onChange={(e) => setLbmEulerMach(parseFloat(e.target.value))}
+              />
+              <span className="value">
+                Ma {lbmEulerMach.toFixed(2)} ({regimeLabel(detectRegime(lbmEulerMach))}) ·{' '}
+                {formatLbmSpeedMs(eulerU0)}
+              </span>
+            </SettingLabel>
+
+            <SettingLabel label="Altitude (m)" tip="ISA atmosphere sets density, pressure, and speed of sound">
+              <NumInput
+                value={lbmEulerAltitude}
+                onChange={setLbmEulerAltitude}
+                min={0}
+                max={50000}
+                step={500}
+              />
+            </SettingLabel>
+          </>
+        )}
 
         <SettingLabel label="Colour field" tip="What to show in the flow visualisation">
           <select
             value={lbmDisplayMode}
-            onChange={(e) => setLbmDisplayMode(e.target.value as 'velocity' | 'pressure')}
+            onChange={(e) => setLbmDisplayMode(e.target.value as 'velocity' | 'pressure' | 'mach')}
           >
-            <option value="velocity">Velocity</option>
+            <option value="velocity">Velocity magnitude</option>
+            {isEuler && <option value="mach">Mach</option>}
             <option value="pressure">Pressure</option>
           </select>
         </SettingLabel>
 
+        {!isEuler && (
         <SettingLabel
           label="Fluid density (ρ₀)"
           tip="Lattice reference density (not kg/m³). Best accuracy at 1.0. Stable range ~0.1–2.5 for this solver; changes apply live without restarting."
@@ -321,8 +457,9 @@ export function LbmControlPanel() {
             <span className="value">{formatLbmFluidDensity(lbmFluidDensity)}</span>
           </div>
         </SettingLabel>
+        )}
 
-        {lbmRunMode === 'prerender' && (
+        {!isEuler && lbmRunMode === 'prerender' && (
           <SettingLabel label="Playback duration" tip="Length of each animation loop, in seconds">
             <NumInput
               value={lbmPlaybackSeconds}
@@ -389,6 +526,9 @@ export function LbmControlPanel() {
           label="Run mode"
           tip="Live steps physics in real time. Pre-render computes all frames first for smooth playback."
         >
+          {isEuler ? (
+            <p className="lbm-custom-shape-note">Euler solves to a steady snapshot in a background worker.</p>
+          ) : (
           <div className="mode-toggle">
             <button
               type="button"
@@ -405,10 +545,17 @@ export function LbmControlPanel() {
               Pre-render
             </button>
           </div>
+          )}
         </SettingLabel>
 
-        {lbmRunMode === 'prerender' && lbmPrerenderStatus === 'ready' && (
+        {!isEuler && lbmRunMode === 'prerender' && lbmPrerenderStatus === 'ready' && (
           <p className="hf-status success">Pre-render complete — ready to play</p>
+        )}
+        {isEuler && eulerTunnelStatus === 'ready' && (
+          <p className="hf-status success">Euler solve complete</p>
+        )}
+        {isEuler && eulerTunnelStatus === 'running' && (
+          <p className="hf-status">Solving Euler… {Math.round(eulerTunnelProgress * 100)}%</p>
         )}
       </div>
 
@@ -508,23 +655,42 @@ export function LbmControlPanel() {
             selected={shape.id === selectedLbmShapeId}
             hovered={shape.id === hoveredLbmShapeId}
             onChange={(next) => updateLbmShape(shape.id, next)}
+            onMove={(id, cx, cy) => updateLbmShapePosition(id, cx, cy)}
+            onMoveCommit={commitLbmShapeLayout}
             onRemove={() => removeLbmShape(shape.id)}
             onHover={(isHovered) =>
               setHoveredLbmShapeId(isHovered ? shape.id : null)
             }
+            onSelect={() => {
+              setSelectedLbmShapeId(shape.id);
+              if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+              }
+            }}
           />
         ))}
       </div>
 
       <div className="lbm-controls-row">
-        <button
-          type="button"
-          className="hf-run-btn"
-          onClick={toggleLbmPlaying}
-          disabled={lbmRunMode === 'prerender' && lbmPrerenderStatus !== 'ready'}
-        >
-          {lbmPlaying ? 'Pause' : 'Play'}
-        </button>
+        {isEuler ? (
+          <button
+            type="button"
+            className="hf-run-btn"
+            onClick={runEulerTunnelSimulation}
+            disabled={eulerTunnelStatus === 'running'}
+          >
+            {eulerTunnelStatus === 'running' ? 'Solving…' : 'Run Euler'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="hf-run-btn"
+            onClick={toggleLbmPlaying}
+            disabled={lbmRunMode === 'prerender' && lbmPrerenderStatus !== 'ready'}
+          >
+            {lbmPlaying ? 'Pause' : 'Play'}
+          </button>
+        )}
         <button type="button" className="shape-btn" onClick={resetLbmSimulation}>
           Reset
         </button>

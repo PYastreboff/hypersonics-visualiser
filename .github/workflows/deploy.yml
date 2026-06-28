@@ -33,6 +33,7 @@ jobs:
       - run: npm run build
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
+          VITE_SITE_URL: https://pyastreboff.github.io/${{ github.event.repository.name }}
       - run: touch dist/.nojekyll
 
       - uses: actions/configure-pages@v4

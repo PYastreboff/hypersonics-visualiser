@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { LbmDisplayMode } from '@/types';
-import { lbmMetricColor, metricRange } from '@/visualization/jetColormap';
+import type { LbmDisplayMode, LbmPhysicsMode } from '@/types';
+import { tunnelMetricColor, tunnelMetricRange } from '@/visualization/jetColormap';
 import { lbmDisplayModeLabel, formatLbmLegendValue, lbmLegendUnitLabel } from '@/physics/lbmConfig';
 
 const TICK_COUNT = 5;
@@ -26,7 +26,7 @@ function paintLegendBar(
 
   for (let x = 0; x < width; x++) {
     const t = x / Math.max(width - 1, 1);
-    const [r, g, b] = lbmMetricColor(displayMode, t);
+    const [r, g, b] = tunnelMetricColor(displayMode, t);
     for (let y = 0; y < BAR_HEIGHT; y++) {
       const i = (y * width + x) * 4;
       image.data[i] = r;
@@ -40,18 +40,35 @@ function paintLegendBar(
 }
 
 export function LbmColorLegend({
+  physicsMode,
   displayMode,
   windSpeed,
   fluidDensity = 1,
+  eulerMach = 0.3,
+  eulerAltitude = 0,
+  rangeOverride = null,
 }: {
+  physicsMode: LbmPhysicsMode;
   displayMode: LbmDisplayMode;
   windSpeed: number;
   fluidDensity?: number;
+  eulerMach?: number;
+  eulerAltitude?: number;
+  rangeOverride?: { vmin: number; vmax: number } | null;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [barWidth, setBarWidth] = useState(0);
-  const { vmin, vmax } = metricRange(displayMode, windSpeed, fluidDensity);
+  const { vmin, vmax } =
+    rangeOverride ??
+    tunnelMetricRange(
+      physicsMode,
+      displayMode,
+      windSpeed,
+      fluidDensity,
+      eulerMach,
+      eulerAltitude,
+    );
   const ticks = useMemo(() => legendTicks(vmin, vmax, TICK_COUNT), [vmin, vmax]);
 
   useEffect(() => {
@@ -96,7 +113,11 @@ export function LbmColorLegend({
           ))}
         </div>
       )}
-      <span className="lbm-legend-unit">{lbmLegendUnitLabel(displayMode)}</span>
+      <span className="lbm-legend-unit">
+        {physicsMode === 'euler' && displayMode === 'pressure'
+          ? 'Pa — low to high'
+          : lbmLegendUnitLabel(displayMode)}
+      </span>
     </div>
   );
 }

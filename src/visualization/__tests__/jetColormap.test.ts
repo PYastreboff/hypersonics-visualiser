@@ -1,19 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { coolwarmColor, jetColor, lbmMetricColor, metricRange } from '@/visualization/jetColormap';
+import { lbmMetricColor, lbmObstacleColor, metricRange, fluidFieldMetricRange, resolveTunnelMetricRange, rainbowColor } from '@/visualization/jetColormap';
 import { LbmSolver } from '@/physics/lbmSolver';
 
 describe('lbm colormaps', () => {
-  it('uses jet for velocity and coolwarm for pressure', () => {
-    expect(lbmMetricColor('velocity', 0)).toEqual(jetColor(0));
-    expect(lbmMetricColor('pressure', 0)).toEqual(coolwarmColor(0));
-    expect(lbmMetricColor('pressure', 1)).toEqual(coolwarmColor(1));
+  it('uses rainbow for all display modes', () => {
+    expect(lbmMetricColor('velocity', 0)).toEqual(rainbowColor(0));
+    expect(lbmMetricColor('pressure', 0)).toEqual(rainbowColor(0));
+    expect(lbmMetricColor('pressure', 1)).toEqual(rainbowColor(1));
+    expect(lbmMetricColor('velocity', 0.5)).toEqual(rainbowColor(0.5));
   });
 
-  it('pressure endpoints are blue and red', () => {
-    const [rLow, , bLow] = coolwarmColor(0);
-    const [rHigh, , bHigh] = coolwarmColor(1);
+  it('rainbow spans blue at low t to red at high t', () => {
+    const [rLow, , bLow] = rainbowColor(0);
+    const [rHigh, , bHigh] = rainbowColor(1);
     expect(bLow).toBeGreaterThan(rLow);
     expect(rHigh).toBeGreaterThan(bHigh);
+  });
+
+  it('uses grey obstacles on rainbow fields', () => {
+    expect(lbmObstacleColor('velocity', false, 'lbm')).toEqual([191, 191, 191]);
+    expect(lbmObstacleColor('velocity', false, 'euler')).toEqual([191, 191, 191]);
+    expect(lbmObstacleColor('mach', false, 'euler')).toEqual([191, 191, 191]);
+    expect(lbmObstacleColor('pressure', false, 'lbm')).toEqual([191, 191, 191]);
+    expect(lbmObstacleColor('pressure', false, 'euler')).toEqual([191, 191, 191]);
   });
 });
 
@@ -29,6 +38,34 @@ describe('metricRange', () => {
     const a = metricRange('velocity', 0.12, 0.6);
     const b = metricRange('velocity', 0.12, 1.6);
     expect(a).toEqual(b);
+  });
+});
+
+describe('fluidFieldMetricRange', () => {
+  it('uses min/max of fluid cells for adaptive Euler scaling', () => {
+    const metric = new Float32Array([1, 5, 2, 9]);
+    const obstacle = new Uint8Array([0, 1, 0, 0]);
+    const range = fluidFieldMetricRange(metric, obstacle);
+    expect(range).not.toBeNull();
+    expect(range!.vmin).toBeLessThan(1);
+    expect(range!.vmax).toBeGreaterThan(9);
+  });
+
+  it('prefers adaptive Euler range over fixed freestream span', () => {
+    const metric = new Float32Array([1.9, 2.0, 2.1, 0.4]);
+    const obstacle = new Uint8Array(4);
+    const adaptive = resolveTunnelMetricRange(
+      'euler',
+      'mach',
+      0,
+      1,
+      2,
+      0,
+      metric,
+      obstacle,
+    );
+    const fixed = resolveTunnelMetricRange('euler', 'mach', 0, 1, 2, 0);
+    expect(adaptive.vmax - adaptive.vmin).toBeLessThan(fixed.vmax - fixed.vmin);
   });
 });
 

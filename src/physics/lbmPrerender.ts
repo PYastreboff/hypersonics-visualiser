@@ -97,7 +97,12 @@ export function getPrerenderFrame(
   const slice = source.subarray(base, base + nx * ny);
 
   if (displayMode === 'velocity' && windSpeed !== undefined) {
-    return scalePrerenderSlice(slice, windSpeed / result.windSpeed);
+    if (result.windSpeed > 1e-12) {
+      return scalePrerenderSlice(slice, windSpeed / result.windSpeed);
+    }
+    if (windSpeed === 0) {
+      return new Float32Array(slice.length);
+    }
   }
 
   if (displayMode === 'pressure' && fluidDensity !== undefined) {

@@ -2,6 +2,7 @@ import type { LbmShapeInput } from '@/types';
 import {
   buildObstacleMask,
   lbmInputToSpec,
+  pointInDoubleWedge,
   scaleShapeSpecs,
   type LbmShapeSpec,
 } from './lbmObstacles';
@@ -27,6 +28,15 @@ function pointInSpec(gx: number, gy: number, spec: LbmShapeSpec): boolean {
   if (spec.type === 'circle') {
     const r = Math.max(1, spec.radius ?? 12);
     return xRot * xRot + yRot * yRot <= r * r;
+  }
+
+  if (spec.type === 'doubleWedge') {
+    return pointInDoubleWedge(
+      xRot,
+      yRot,
+      spec.width ?? 60,
+      spec.height ?? 24,
+    );
   }
 
   if (spec.type === 'custom') {

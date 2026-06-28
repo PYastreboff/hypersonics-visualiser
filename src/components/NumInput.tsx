@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 export function NumInput({
   value,
   onChange,
+  onCommit,
   min,
   max,
   step,
@@ -11,6 +12,7 @@ export function NumInput({
 }: {
   value: number;
   onChange: (v: number) => void;
+  onCommit?: () => void;
   min?: number;
   max?: number;
   step?: number;
@@ -58,6 +60,7 @@ export function NumInput({
       }}
       onBlur={() => {
         if (draft !== null) commit(draft);
+        onCommit?.();
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' && draft !== null) {

@@ -45,6 +45,14 @@ describe('LbmSolver inlet column', () => {
     expect(ux[0]).toBeCloseTo(0.14, 5);
   });
 
+  it('supports zero inlet speed', () => {
+    const solver = new LbmSolver({ nx: 40, ny: 20, windSpeed: 0, rho0: 1 }, new Uint8Array(40 * 20));
+    for (let i = 0; i < 10; i++) solver.step();
+    const { ux } = solver.getDisplayMacroscopic();
+    expect(ux[0]).toBe(0);
+    expect(ux[40]).toBeCloseTo(0, 2);
+  });
+
   it('matches gem.py by using pre-collision display state for metrics', () => {
     const solver = new LbmSolver({ nx: 40, ny: 20, windSpeed: 0.12, rho0: 1 }, new Uint8Array(40 * 20));
     solver.step();

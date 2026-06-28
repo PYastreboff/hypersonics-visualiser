@@ -1,7 +1,7 @@
 import type { LbmShapeInput } from '@/types';
 
 export interface LbmShapeSpec {
-  type: 'square' | 'circle' | 'airfoil' | 'custom';
+  type: 'square' | 'circle' | 'airfoil' | 'doubleWedge' | 'custom';
   cx: number;
   cy: number;
   aoa: number;
@@ -55,6 +55,18 @@ export function scaleShapeSpecs(
   });
 }
 
+/** Diamond profile: square rotated 45° with independent horizontal/vertical scale. */
+export function pointInDoubleWedge(
+  xRot: number,
+  yRot: number,
+  length: number,
+  thickness: number,
+): boolean {
+  const halfLen = Math.max(1, length) / 2;
+  const halfThick = Math.max(1, thickness) / 2;
+  return Math.abs(xRot) / halfLen + Math.abs(yRot) / halfThick <= 1;
+}
+
 /** Build obstacle mask — direct port of gem.py multi-obstacle generation. */
 export function buildObstacleMask(
   nx: number,
@@ -97,6 +109,17 @@ export function buildObstacleMask(
         } else if (shape.type === 'circle') {
           const r = Math.max(1, shape.radius ?? 12);
           if (xRot * xRot + yRot * yRot <= r * r) {
+            obstacle[x * ny + y] = 1;
+          }
+        } else if (shape.type === 'doubleWedge') {
+          if (
+            pointInDoubleWedge(
+              xRot,
+              yRot,
+              shape.width ?? 60,
+              shape.height ?? 24,
+            )
+          ) {
             obstacle[x * ny + y] = 1;
           }
         }

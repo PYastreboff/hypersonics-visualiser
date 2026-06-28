@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Flow Visualiser">
+  <defs>
+    <linearGradient id="flow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00007f"/>
+      <stop offset="35%" stop-color="#0080ff"/>
+      <stop offset="65%" stop-color="#ffff00"/>
+      <stop offset="100%" stop-color="#ff0000"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="#0a0e14"/>
+  <rect x="80" y="120" width="1040" height="280" rx="16" fill="#121820" stroke="#2a3444" stroke-width="2"/>
+  <rect x="100" y="140" width="1000" height="240" rx="8" fill="url(#flow)" opacity="0.85"/>
+  <path d="M420 260 L520 200 L520 320 Z" fill="#1a2230" stroke="#8b949e" stroke-width="3"/>
+  <path d="M460 260 L520 230 L520 290 Z" fill="#4a5568"/>
+  <text x="80" y="500" fill="#e8eaed" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="56" font-weight="700">
+    Flow Visualiser
+  </text>
+  <text x="80" y="555" fill="#8b949e" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="28">
+    Lattice Boltzmann CFD � Hypersonic flow � Peter Yastreboff
+  </text>
+</svg>

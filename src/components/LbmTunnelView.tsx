@@ -13,13 +13,22 @@ import {
   stencilArraysFromKeys,
   strokeLogicalPoints,
 } from '@/physics/lbmDrawBrush';
-import { lbmGridSize, lbmTotalFrames, LBM_FRAME_MS, lbmDisplayModeLabel, lbmRunModeLabel } from '@/physics/lbmConfig';
+import { lbmGridSize, lbmTotalFrames, LBM_FRAME_MS, lbmDisplayModeLabel, lbmRunModeLabel, lbmPhysicsModeLabel } from '@/physics/lbmConfig';
 import {
   getPrerenderFrame,
   type LbmPrerenderResult,
 } from '@/physics/lbmPrerender';
-import { lbmMetricColor, metricRange } from '@/visualization/jetColormap';
+import {
+  getEulerTunnelMetric,
+  type EulerTunnelResult,
+} from '@/physics/eulerTunnelSolver';
+import type { LbmDisplayMode, LbmPhysicsMode } from '@/types';
+import { tunnelMetricColor, resolveTunnelMetricRange, lbmObstacleColor } from '@/visualization/jetColormap';
 import { LbmColorLegend } from './LbmColorLegend';
+
+function lbmLatticeField(mode: LbmDisplayMode): 'velocity' | 'pressure' {
+  return mode === 'pressure' ? 'pressure' : 'velocity';
+}
 
 function fitDrawRect(
   containerW: number,
@@ -46,20 +55,29 @@ function renderFrame(
   obstacle: Uint8Array,
   nx: number,
   ny: number,
-  displayMode: 'velocity' | 'pressure',
+  displayMode: LbmDisplayMode,
+  physicsMode: LbmPhysicsMode,
   windSpeed: number,
   containerW: number,
   containerH: number,
   offscreen: HTMLCanvasElement,
   fluidDensity = 1,
+  eulerMach = 0.3,
+  eulerAltitude = 0,
   highlightMask: Uint8Array | null = null,
-): void {
-  const { vmin, vmax } = metricRange(displayMode, windSpeed, fluidDensity);
+): { vmin: number; vmax: number } {
+  const { vmin, vmax } = resolveTunnelMetricRange(
+    physicsMode,
+    displayMode,
+    windSpeed,
+    fluidDensity,
+    eulerMach,
+    eulerAltitude,
+    metric,
+    obstacle,
+  );
   const range = Math.max(vmax - vmin, 1e-9);
   const image = offscreen.getContext('2d')!.createImageData(nx, ny);
-  const isPressure = displayMode === 'pressure';
-  const gray = Math.round((isPressure ? 0.38 : 0.75) * 255);
-  const highlightGray = Math.round((isPressure ? 0.52 : 0.88) * 255);
 
   for (let x = 0; x < nx; x++) {
     for (let y = 0; y < ny; y++) {
@@ -69,21 +87,16 @@ function renderFrame(
       const out = (py * nx + px) * 4;
 
       if (obstacle[idx]) {
-        if (highlightMask?.[idx]) {
-          image.data[out] = highlightGray;
-          image.data[out + 1] = highlightGray;
-          image.data[out + 2] = highlightGray;
-        } else {
-          image.data[out] = gray;
-          image.data[out + 1] = gray;
-          image.data[out + 2] = gray;
-        }
+        const [r, g, b] = lbmObstacleColor(displayMode, Boolean(highlightMask?.[idx]), physicsMode);
+        image.data[out] = r;
+        image.data[out + 1] = g;
+        image.data[out + 2] = b;
         image.data[out + 3] = 255;
         continue;
       }
 
       const t = (metric[idx] - vmin) / range;
-      const [r, g, b] = lbmMetricColor(displayMode, t);
+      const [r, g, b] = tunnelMetricColor(displayMode, t);
       image.data[out] = r;
       image.data[out + 1] = g;
       image.data[out + 2] = b;
@@ -101,6 +114,7 @@ function renderFrame(
   ctx.fillRect(0, 0, containerW, containerH);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(offscreen, rect.x, rect.y, rect.w, rect.h);
+  return { vmin, vmax };
 }
 
 export function LbmTunnelView() {
@@ -110,6 +124,10 @@ export function LbmTunnelView() {
   const obstacleRef = useRef<Uint8Array | null>(null);
   const prerenderRef = useRef<LbmPrerenderResult | null>(null);
   const prerenderWorkerRef = useRef<Worker | null>(null);
+  const prerenderRunIdRef = useRef(0);
+  const [prerenderBackend, setPrerenderBackend] = useState<'gpu' | 'cpu' | null>(null);
+  const eulerResultRef = useRef<EulerTunnelResult | null>(null);
+  const eulerWorkerRef = useRef<Worker | null>(null);
   const dragRef = useRef<{
     shapeId: string;
     startGx: number;
@@ -135,9 +153,15 @@ export function LbmTunnelView() {
 
   const {
     lbmShapes,
+    lbmPhysicsMode,
     lbmDisplayMode,
     lbmWindSpeed,
     lbmFluidDensity,
+    lbmEulerMach,
+    lbmEulerAltitude,
+    eulerTunnelStatus,
+    eulerTunnelProgress,
+    eulerTunnelSeed,
     lbmResolutionScale,
     lbmTunnelNx,
     lbmTunnelNy,
@@ -165,6 +189,7 @@ export function LbmTunnelView() {
     addLbmShape,
     updateLbmShapeStencil,
     applyLbmEraseBrush,
+    setEulerTunnelState,
   } = useSimStore();
 
   const [isDragging, setIsDragging] = useState(false);
@@ -175,6 +200,9 @@ export function LbmTunnelView() {
     r: number;
   } | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
+  const [eulerLegendRange, setEulerLegendRange] = useState<{ vmin: number; vmax: number } | null>(
+    null,
+  );
 
   const { nx, ny, renderStep } = lbmGridSize(lbmTunnelNx, lbmTunnelNy, lbmResolutionScale);
   const totalFrames = lbmTotalFrames(lbmPlaybackSeconds);
@@ -187,12 +215,13 @@ export function LbmTunnelView() {
   }, []);
 
   const buildObstacle = useCallback(() => {
+    const shapes = useSimStore.getState().lbmShapes;
     const specs = scaleShapeSpecs(
-      lbmShapes.map(lbmInputToSpec),
+      shapes.map(lbmInputToSpec),
       lbmResolutionScale,
     );
     return buildObstacleMask(nx, ny, specs);
-  }, [lbmShapes, nx, ny, lbmResolutionScale]);
+  }, [nx, ny, lbmResolutionScale]);
 
   const updateHoverHighlight = useCallback(
     (shapeId: string | null) => {
@@ -218,22 +247,40 @@ export function LbmTunnelView() {
       const ctx = canvas?.getContext('2d');
       if (!canvas || !obstacle || !ctx) return;
 
-      const { lbmDisplayMode, lbmWindSpeed, lbmFluidDensity } = useSimStore.getState();
+      const dpr = window.devicePixelRatio || 1;
+      const viewW = canvas.clientWidth;
+      const viewH = canvas.clientHeight;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      renderFrame(
+      const {
+        lbmPhysicsMode,
+        lbmDisplayMode,
+        lbmWindSpeed,
+        lbmFluidDensity,
+        lbmEulerMach,
+        lbmEulerAltitude,
+      } = useSimStore.getState();
+
+      const range = renderFrame(
         ctx,
         metric,
         obstacle,
         nx,
         ny,
         lbmDisplayMode,
+        lbmPhysicsMode,
         lbmWindSpeed,
-        canvas.width,
-        canvas.height,
+        viewW,
+        viewH,
         getOffscreen(),
         lbmFluidDensity,
+        lbmEulerMach,
+        lbmEulerAltitude,
         hoverMaskRef.current,
       );
+      if (lbmPhysicsMode === 'euler') {
+        setEulerLegendRange(range);
+      }
     },
     [nx, ny, getOffscreen],
   );
@@ -242,13 +289,27 @@ export function LbmTunnelView() {
   paintMetricRef.current = paintMetric;
 
   const paintCurrent = useCallback(() => {
-    const { lbmRunMode, lbmDisplayMode, lbmFluidDensity, lbmWindSpeed } = useSimStore.getState();
+    const {
+      lbmPhysicsMode,
+      lbmRunMode,
+      lbmDisplayMode,
+      lbmFluidDensity,
+      lbmWindSpeed,
+    } = useSimStore.getState();
+
+    if (lbmPhysicsMode === 'euler') {
+      const result = eulerResultRef.current;
+      if (!result) return;
+      paintMetric(getEulerTunnelMetric(result, lbmDisplayMode));
+      return;
+    }
+
     if (lbmRunMode === 'prerender' && prerenderRef.current) {
       paintMetric(
         getPrerenderFrame(
           prerenderRef.current,
           frameRef.current,
-          lbmDisplayMode,
+          lbmLatticeField(lbmDisplayMode),
           lbmFluidDensity,
           lbmWindSpeed,
         ),
@@ -257,7 +318,7 @@ export function LbmTunnelView() {
     }
     const solver = solverRef.current;
     if (!solver) return;
-    paintMetric(solver.getMetric(lbmDisplayMode));
+    paintMetric(solver.getMetric(lbmLatticeField(lbmDisplayMode)));
   }, [paintMetric]);
 
   const paintCurrentRef = useRef(paintCurrent);
@@ -300,10 +361,79 @@ export function LbmTunnelView() {
     );
     frameRef.current = 0;
     setLbmFrameIndex(0);
-    paintMetric(solverRef.current.getMetric(useSimStore.getState().lbmDisplayMode));
+    paintMetric(solverRef.current.getMetric(lbmLatticeField(useSimStore.getState().lbmDisplayMode)));
   }, [nx, ny, lbmResolutionScale, paintMetric, setLbmFrameIndex]);
 
+  const cancelEulerRun = useCallback(() => {
+    if (eulerWorkerRef.current) {
+      eulerWorkerRef.current.postMessage({ type: 'cancel' });
+      eulerWorkerRef.current.terminate();
+      eulerWorkerRef.current = null;
+    }
+  }, []);
+
+  const startEulerRun = useCallback(() => {
+    cancelEulerRun();
+
+    const obstacle = buildObstacle();
+    obstacleRef.current = obstacle;
+    const obstacleCopy = new Uint8Array(obstacle);
+    const { lbmEulerMach, lbmEulerAltitude } = useSimStore.getState();
+
+    setEulerTunnelState({ status: 'running', progress: 0 });
+
+    const worker = new Worker(
+      new URL('../workers/eulerTunnel.worker.ts', import.meta.url),
+      { type: 'module' },
+    );
+    eulerWorkerRef.current = worker;
+
+    worker.onmessage = (e: MessageEvent) => {
+      const data = e.data;
+      if (data.type === 'progress') {
+        setEulerTunnelState({ progress: data.progress });
+      } else if (data.type === 'complete') {
+        eulerResultRef.current = {
+          nx: data.nx,
+          ny: data.ny,
+          mach: data.mach,
+          altitude: data.altitude,
+          velocity: data.velocity,
+          machField: data.machField,
+          pressure: data.pressure,
+        };
+        setEulerTunnelState({ status: 'ready', progress: 1 });
+        paintMetricRef.current(
+          getEulerTunnelMetric(eulerResultRef.current, useSimStore.getState().lbmDisplayMode),
+        );
+        worker.terminate();
+        eulerWorkerRef.current = null;
+      } else if (data.type === 'error') {
+        setEulerTunnelState({ status: 'error', progress: 0 });
+        worker.terminate();
+        eulerWorkerRef.current = null;
+      } else if (data.type === 'cancelled') {
+        setEulerTunnelState({ status: 'cancelled', progress: 0 });
+        worker.terminate();
+        eulerWorkerRef.current = null;
+      }
+    };
+
+    worker.postMessage(
+      {
+        type: 'run',
+        nx,
+        ny,
+        mach: lbmEulerMach,
+        altitude: lbmEulerAltitude,
+        obstacle: obstacleCopy.buffer,
+      },
+      [obstacleCopy.buffer],
+    );
+  }, [buildObstacle, cancelEulerRun, nx, ny, setEulerTunnelState]);
+
   const cancelPrerender = useCallback(() => {
+    prerenderRunIdRef.current += 1;
     if (prerenderWorkerRef.current) {
       prerenderWorkerRef.current.postMessage({ type: 'cancel' });
       prerenderWorkerRef.current.terminate();
@@ -314,7 +444,9 @@ export function LbmTunnelView() {
   const startPrerender = useCallback(() => {
     cancelPrerender();
     prerenderRef.current = null;
+    setPrerenderBackend(null);
 
+    const runId = ++prerenderRunIdRef.current;
     const obstacle = buildObstacle();
     obstacleRef.current = obstacle;
     const obstacleCopy = new Uint8Array(obstacle);
@@ -330,11 +462,16 @@ export function LbmTunnelView() {
     );
     prerenderWorkerRef.current = worker;
 
+    const isCurrentRun = () => runId === prerenderRunIdRef.current;
+
     worker.onmessage = (e: MessageEvent) => {
+      if (!isCurrentRun()) return;
       const data = e.data;
       if (data.type === 'progress') {
+        if (data.backend) setPrerenderBackend(data.backend);
         setLbmPrerenderState({ progress: data.progress });
       } else if (data.type === 'complete') {
+        if (data.backend) setPrerenderBackend(data.backend);
         prerenderRef.current = {
           velocityFrames: data.velocityFrames,
           pressureFrames: data.pressureFrames,
@@ -352,7 +489,7 @@ export function LbmTunnelView() {
           getPrerenderFrame(
             prerenderRef.current,
             0,
-            useSimStore.getState().lbmDisplayMode,
+            lbmLatticeField(useSimStore.getState().lbmDisplayMode),
             useSimStore.getState().lbmFluidDensity,
             useSimStore.getState().lbmWindSpeed,
           ),
@@ -364,10 +501,21 @@ export function LbmTunnelView() {
         worker.terminate();
         prerenderWorkerRef.current = null;
       } else if (data.type === 'cancelled') {
-        setLbmPrerenderState({ status: 'cancelled', progress: 0 });
+        if (prerenderWorkerRef.current === worker) {
+          setLbmPrerenderState({ status: 'cancelled', progress: 0 });
+        }
         worker.terminate();
-        prerenderWorkerRef.current = null;
+        if (prerenderWorkerRef.current === worker) {
+          prerenderWorkerRef.current = null;
+        }
       }
+    };
+
+    worker.onerror = () => {
+      if (!isCurrentRun()) return;
+      setLbmPrerenderState({ status: 'error', progress: 0 });
+      worker.terminate();
+      prerenderWorkerRef.current = null;
     };
 
     worker.postMessage(
@@ -397,14 +545,19 @@ export function LbmTunnelView() {
     setLbmPrerenderState,
   ]);
 
+  const startEulerRunRef = useRef(startEulerRun);
+  startEulerRunRef.current = startEulerRun;
+  const startPrerenderRef = useRef(startPrerender);
+  startPrerenderRef.current = startPrerender;
+
   useEffect(() => {
-    if (lbmRunMode !== 'prerender') return;
-    startPrerender();
+    if (lbmPhysicsMode !== 'lbm' || lbmRunMode !== 'prerender') return;
+    startPrerenderRef.current();
     return () => cancelPrerender();
   }, [
+    lbmPhysicsMode,
     lbmRunMode,
     lbmSeed,
-    lbmShapes,
     lbmResolutionScale,
     lbmTunnelNx,
     lbmTunnelNy,
@@ -412,29 +565,38 @@ export function LbmTunnelView() {
     nx,
     ny,
     renderStep,
-    startPrerender,
     cancelPrerender,
   ]);
 
   useEffect(() => {
-    if (lbmRunMode === 'prerender') return;
+    if (lbmPhysicsMode !== 'lbm' || lbmRunMode === 'prerender') return;
     resetLiveSimulation();
     setLbmPlaying(true);
-  }, [lbmRunMode, lbmSeed, resetLiveSimulation, setLbmPlaying, lbmTunnelNx, lbmTunnelNy]);
+  }, [lbmPhysicsMode, lbmRunMode, lbmSeed, resetLiveSimulation, setLbmPlaying, lbmTunnelNx, lbmTunnelNy]);
+
+  useEffect(() => {
+    if (lbmPhysicsMode !== 'euler') return;
+    startEulerRunRef.current();
+    return () => cancelEulerRun();
+  }, [
+    lbmPhysicsMode,
+    eulerTunnelSeed,
+    lbmResolutionScale,
+    lbmTunnelNx,
+    lbmTunnelNy,
+    nx,
+    ny,
+    cancelEulerRun,
+  ]);
 
   useEffect(() => {
     updateHoverHighlight(hoveredLbmShapeId);
-    paintCurrent();
-  }, [hoveredLbmShapeId, lbmShapes, lbmResolutionScale, updateHoverHighlight, paintCurrent]);
-
-  useEffect(() => {
-    if (lbmRunMode !== 'live' || !solverRef.current) return;
     rebuildObstacleVisual();
     paintCurrent();
-  }, [lbmShapes, lbmRunMode, rebuildObstacleVisual, paintCurrent]);
+  }, [hoveredLbmShapeId, lbmShapes, lbmResolutionScale, updateHoverHighlight, rebuildObstacleVisual, paintCurrent]);
 
   useEffect(() => {
-    if (lbmRunMode !== 'prerender' || lbmPrerenderStatus !== 'ready' || !prerenderRef.current) return;
+    if (lbmPhysicsMode !== 'lbm' || lbmRunMode !== 'prerender' || lbmPrerenderStatus !== 'ready' || !prerenderRef.current) return;
     frameRef.current = lbmFrameIndex;
     if (!lbmPlaying) {
       const { lbmDisplayMode, lbmFluidDensity, lbmWindSpeed } = useSimStore.getState();
@@ -442,7 +604,7 @@ export function LbmTunnelView() {
         getPrerenderFrame(
           prerenderRef.current,
           lbmFrameIndex,
-          lbmDisplayMode,
+          lbmLatticeField(lbmDisplayMode),
           lbmFluidDensity,
           lbmWindSpeed,
         ),
@@ -450,6 +612,7 @@ export function LbmTunnelView() {
     }
   }, [
     lbmFrameIndex,
+    lbmPhysicsMode,
     lbmRunMode,
     lbmPrerenderStatus,
     lbmPlaying,
@@ -458,21 +621,23 @@ export function LbmTunnelView() {
   ]);
 
   useEffect(() => {
-    if (lbmRunMode !== 'prerender' || lbmPrerenderStatus !== 'ready' || !prerenderRef.current) return;
+    if (lbmPhysicsMode !== 'lbm' || lbmRunMode !== 'prerender' || lbmPrerenderStatus !== 'ready' || !prerenderRef.current) return;
     frameRef.current = 0;
     setLbmFrameIndex(0);
     paintCurrent();
-  }, [lbmRewind, lbmRunMode, lbmPrerenderStatus, paintCurrent, setLbmFrameIndex]);
+  }, [lbmPhysicsMode, lbmRewind, lbmRunMode, lbmPrerenderStatus, paintCurrent, setLbmFrameIndex]);
 
   useEffect(() => {
+    if (lbmPhysicsMode !== 'lbm') return;
     solverRef.current?.updateFluidDensity(lbmFluidDensity);
     paintCurrentRef.current();
-  }, [lbmFluidDensity]);
+  }, [lbmPhysicsMode, lbmFluidDensity]);
 
   useEffect(() => {
+    if (lbmPhysicsMode !== 'lbm') return;
     solverRef.current?.updateWindSpeed(lbmWindSpeed);
     paintCurrentRef.current();
-  }, [lbmWindSpeed]);
+  }, [lbmPhysicsMode, lbmWindSpeed]);
 
   useEffect(() => {
     paintCurrentRef.current();
@@ -485,9 +650,18 @@ export function LbmTunnelView() {
     const resize = () => {
       const parent = canvas.parentElement;
       if (!parent) return;
-      canvas.width = parent.clientWidth;
-      canvas.height = parent.clientHeight;
-      setCanvasSize({ w: canvas.width, h: canvas.height });
+      const dpr = window.devicePixelRatio || 1;
+      const w = parent.clientWidth;
+      const h = parent.clientHeight;
+      canvas.width = Math.max(1, Math.round(w * dpr));
+      canvas.height = Math.max(1, Math.round(h * dpr));
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      setCanvasSize({ w, h });
       paintCurrent();
     };
     resize();
@@ -504,6 +678,7 @@ export function LbmTunnelView() {
     const tick = (now: number) => {
       rafRef.current = requestAnimationFrame(tick);
 
+      if (useSimStore.getState().lbmPhysicsMode !== 'lbm') return;
       if (!lbmPlaying) return;
       if (lbmRunMode === 'prerender' && lbmPrerenderStatus !== 'ready') return;
 
@@ -523,7 +698,7 @@ export function LbmTunnelView() {
           getPrerenderFrame(
             prerenderRef.current,
             nextFrame,
-            lbmDisplayMode,
+            lbmLatticeField(lbmDisplayMode),
             lbmFluidDensity,
             lbmWindSpeed,
           ),
@@ -541,7 +716,7 @@ export function LbmTunnelView() {
       const nextFrame = frameRef.current + 1;
       frameRef.current = nextFrame;
       setLbmFrameIndex(nextFrame);
-      paintMetricRef.current(solver.getMetric(useSimStore.getState().lbmDisplayMode));
+      paintMetricRef.current(solver.getMetric(lbmLatticeField(useSimStore.getState().lbmDisplayMode)));
     };
 
     rafRef.current = requestAnimationFrame(tick);
@@ -557,8 +732,13 @@ export function LbmTunnelView() {
     setLbmFrameIndex,
   ]);
 
-  const showPrerenderPlaceholder =
-    lbmRunMode === 'prerender' && lbmPrerenderStatus !== 'ready';
+  const showSolverPlaceholder =
+    !isDragging &&
+    !isDrawing &&
+    ((lbmPhysicsMode === 'lbm' &&
+      lbmRunMode === 'prerender' &&
+      lbmPrerenderStatus !== 'ready') ||
+      (lbmPhysicsMode === 'euler' && eulerTunnelStatus !== 'ready'));
 
   const updateBrushPreview = useCallback(
     (clientX: number, clientY: number) => {
@@ -763,7 +943,7 @@ export function LbmTunnelView() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || showPrerenderPlaceholder) return;
+    if (!canvas || showSolverPlaceholder) return;
 
     const onPointerDown = (e: PointerEvent) => {
       const grid = screenToGrid(e.clientX, e.clientY, canvas, nx, ny, fitDrawRect);
@@ -787,10 +967,15 @@ export function LbmTunnelView() {
       );
       if (!shape) {
         setSelectedLbmShapeId(null);
+        canvas.focus();
         return;
       }
 
       e.preventDefault();
+      canvas.focus();
+      if (document.activeElement instanceof HTMLElement && document.activeElement !== canvas) {
+        document.activeElement.blur();
+      }
       canvas.setPointerCapture(e.pointerId);
       setSelectedLbmShapeId(shape.id);
       setHoveredLbmShapeId(shape.id);
@@ -893,7 +1078,7 @@ export function LbmTunnelView() {
     setHoveredLbmShapeId,
     setLbmPlaying,
     setSelectedLbmShapeId,
-    showPrerenderPlaceholder,
+    showSolverPlaceholder,
   ]);
 
   const prerenderFrame = Math.min(
@@ -905,9 +1090,10 @@ export function LbmTunnelView() {
     <div className="lbm-container">
       <div className="lbm-title-bar">
         <span>
-          Flow Visualiser | {lbmDisplayModeLabel(lbmDisplayMode)}
-          {lbmRunMode === 'live' && <> | Time: {lbmElapsedSec.toFixed(1)}s</>}
-          {lbmRunMode === 'prerender' && (
+          Flow Visualiser | {lbmPhysicsModeLabel(lbmPhysicsMode)} | {lbmDisplayModeLabel(lbmDisplayMode)}
+          {lbmPhysicsMode === 'euler' && ' · Inviscid Euler — educational'}
+          {lbmPhysicsMode === 'lbm' && lbmRunMode === 'live' && <> | Time: {lbmElapsedSec.toFixed(1)}s</>}
+          {lbmPhysicsMode === 'lbm' && lbmRunMode === 'prerender' && (
             <>
               {' '}
               | Time: {lbmElapsedSec.toFixed(1)}s / {lbmPlaybackSeconds.toFixed(1)}s
@@ -915,32 +1101,57 @@ export function LbmTunnelView() {
           )}
         </span>
         <span className="lbm-grid-label">
-          {nx} × {ny} grid · {lbmShapes.length} obstacle{lbmShapes.length === 1 ? '' : 's'} ·{' '}
-          {lbmRunModeLabel(lbmRunMode)}
+          {nx} × {ny} grid · {lbmShapes.length} obstacle{lbmShapes.length === 1 ? '' : 's'}
+          {lbmPhysicsMode === 'lbm' && <> · {lbmRunModeLabel(lbmRunMode)}</>}
+          {lbmPhysicsMode === 'euler' && (
+            <> · Ma {lbmEulerMach.toFixed(2)} · {lbmEulerAltitude} m</>
+          )}
         </span>
       </div>
 
-      <div className="lbm-canvas-wrap">
-        {showPrerenderPlaceholder && (
+      <div className="lbm-stage">
+      <div className="lbm-canvas-wrap" style={{ aspectRatio: `${nx} / ${ny}` }}>
+        {showSolverPlaceholder && (
           <div className="lbm-placeholder">
             <div className="lbm-placeholder-inner">
-              <strong>Pre-rendering simulation</strong>
+              <strong>
+                {lbmPhysicsMode === 'euler' ? 'Running Euler solver' : 'Pre-rendering simulation'}
+              </strong>
               <p>
-                {lbmPrerenderStatus === 'error'
-                  ? 'Pre-render failed — adjust settings or switch to Live mode.'
-                  : 'Computing all frames before playback.'}
+                {lbmPhysicsMode === 'euler'
+                  ? eulerTunnelStatus === 'error'
+                    ? 'Euler solve failed — try a lower Mach or coarser grid.'
+                    : 'Computing compressible inviscid flow on the tunnel grid.'
+                  : lbmPrerenderStatus === 'error'
+                    ? 'Pre-render failed — adjust settings or switch to Live mode.'
+                    : prerenderBackend === 'gpu'
+                      ? 'Computing all frames on GPU before playback.'
+                      : 'Computing all frames before playback.'}
               </p>
-              {lbmPrerenderStatus !== 'error' && (
+              {(lbmPhysicsMode === 'euler'
+                ? eulerTunnelStatus !== 'error'
+                : lbmPrerenderStatus !== 'error') && (
                 <>
                   <div className="progress-bar">
                     <div
                       className="progress-fill"
-                      style={{ width: `${lbmPrerenderProgress * 100}%` }}
+                      style={{
+                        width: `${
+                          (lbmPhysicsMode === 'euler'
+                            ? eulerTunnelProgress
+                            : lbmPrerenderProgress) * 100
+                        }%`,
+                      }}
                     />
                   </div>
-                  <span>
-                    Frame {prerenderFrame} / {totalFrames}
-                  </span>
+                  {lbmPhysicsMode === 'lbm' && (
+                    <span>
+                      Frame {prerenderFrame} / {totalFrames}
+                    </span>
+                  )}
+                  {lbmPhysicsMode === 'euler' && (
+                    <span>{Math.round(eulerTunnelProgress * 100)}%</span>
+                  )}
                 </>
               )}
             </div>
@@ -948,9 +1159,11 @@ export function LbmTunnelView() {
         )}
         <canvas
           ref={canvasRef}
+          tabIndex={0}
+          aria-label="Flow tunnel canvas"
           className={[
             'lbm-canvas',
-            showPrerenderPlaceholder ? 'lbm-canvas-hidden' : '',
+            showSolverPlaceholder ? 'lbm-canvas-hidden' : '',
             isDrawing
               ? 'lbm-canvas-drawing'
               : lbmInteractionMode === 'draw'
@@ -965,7 +1178,7 @@ export function LbmTunnelView() {
             .join(' ')}
         />
         {brushPreview &&
-          !showPrerenderPlaceholder &&
+          !showSolverPlaceholder &&
           lbmInteractionMode === 'draw' &&
           canvasSize.w > 0 && (
             <svg
@@ -986,13 +1199,11 @@ export function LbmTunnelView() {
             </svg>
           )}
       </div>
-      <div className="lbm-axis-labels">
-        <span>Length</span>
-        <span>Height</span>
       </div>
-      {lbmRunMode === 'prerender' &&
+      {lbmPhysicsMode === 'lbm' &&
+        lbmRunMode === 'prerender' &&
         lbmPrerenderStatus === 'ready' &&
-        !showPrerenderPlaceholder && (
+        !showSolverPlaceholder && (
           <div className="lbm-scrubber">
             <input
               type="range"
@@ -1014,14 +1225,18 @@ export function LbmTunnelView() {
             </div>
           </div>
         )}
-      {!showPrerenderPlaceholder && (
+      {!showSolverPlaceholder && (
         <LbmColorLegend
+          physicsMode={lbmPhysicsMode}
           displayMode={lbmDisplayMode}
           windSpeed={lbmWindSpeed}
           fluidDensity={lbmFluidDensity}
+          eulerMach={lbmEulerMach}
+          eulerAltitude={lbmEulerAltitude}
+          rangeOverride={lbmPhysicsMode === 'euler' ? eulerLegendRange : null}
         />
       )}
-      {!showPrerenderPlaceholder && (
+      {!showSolverPlaceholder && (
         <p className="lbm-drag-hint">
           {lbmInteractionMode === 'draw'
             ? lbmDrawDensity === 'decrease'

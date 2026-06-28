@@ -40,33 +40,67 @@ export function lbmResolutionLabel(
   return `${tier} — ${nx} × ${ny} cells`;
 }
 
-export function lbmDisplayModeLabel(mode: 'velocity' | 'pressure'): string {
+export function lbmDisplayModeLabel(mode: 'velocity' | 'pressure' | 'mach'): string {
+  if (mode === 'mach') return 'Mach';
   return mode === 'velocity' ? 'Velocity' : 'Pressure';
+}
+
+export function lbmPhysicsModeLabel(mode: 'lbm' | 'euler'): string {
+  return mode === 'lbm' ? 'LBM (low Ma)' : 'Euler 2D (compressible)';
 }
 
 export function lbmRunModeLabel(mode: 'live' | 'prerender'): string {
   return mode === 'live' ? 'Live' : 'Pre-render';
 }
 
-/** gem.py treats inlet speed and velocity field values as m/s */
+import { GAMMA } from '@/physics/constants';
+import {
+  densityAtAltitude,
+  speedOfSound,
+  temperatureAtAltitude,
+} from '@/physics/atmosphere';
+
+export const EULER_MIN_MACH = 0;
+export const EULER_MAX_MACH = 12;
+
+export function clampEulerMach(mach: number): number {
+  return Math.min(EULER_MAX_MACH, Math.max(EULER_MIN_MACH, Number.isFinite(mach) ? mach : 0));
+}
+
+export function eulerFreestreamSpeed(mach: number, altitude: number): number {
+  return mach * speedOfSound(temperatureAtAltitude(altitude));
+}
+
+export function eulerFreestreamPressure(_mach: number, altitude: number): number {
+  const temp = temperatureAtAltitude(altitude);
+  const rho0 = densityAtAltitude(altitude);
+  const a0 = speedOfSound(temp);
+  return rho0 * a0 * a0 / GAMMA;
+}
 export function formatLbmSpeedMs(speed: number, decimals = 2): string {
   return `${speed.toFixed(decimals)} m/s`;
 }
 
 export function formatLbmLegendValue(
-  displayMode: 'velocity' | 'pressure',
+  displayMode: 'velocity' | 'pressure' | 'mach',
   value: number,
 ): string {
   if (displayMode === 'velocity') {
     return formatLbmSpeedMs(value, 3);
   }
+  if (displayMode === 'mach') {
+    return value.toFixed(2);
+  }
   return value.toFixed(4);
 }
 
-export function lbmLegendUnitLabel(displayMode: 'velocity' | 'pressure'): string {
+export function lbmLegendUnitLabel(displayMode: 'velocity' | 'pressure' | 'mach'): string {
   if (displayMode === 'velocity') return 'm/s — low to high';
-  return 'Lattice pressure — low (blue) to high (red)';
+  if (displayMode === 'mach') return 'Mach — low to high';
+  return 'Lattice pressure — low to high';
 }
+
+/** gem.py treats inlet speed and velocity field values as m/s */
 
 /**
  * Lattice reference density ρ₀ (dimensionless), not SI kg/m³.

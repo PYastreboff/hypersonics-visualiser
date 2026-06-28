@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useSimStore } from '@/store/simStore';
 import { WindTunnelScene } from './components/WindTunnelScene';
 import { LbmTunnelView } from './components/LbmTunnelView';
@@ -9,6 +10,44 @@ import { ShapePalette } from './components/ShapePalette';
 export default function App() {
   const viewMode = useSimStore((s) => s.viewMode);
   const setViewMode = useSimStore((s) => s.setViewMode);
+
+  useEffect(() => {
+    const isFormField = (target: EventTarget | null): boolean =>
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isFormField(e.target)) return;
+
+      const state = useSimStore.getState();
+
+      if (e.code === 'Space') {
+        if (state.viewMode !== 'lbm') return;
+        if (state.lbmRunMode === 'prerender' && state.lbmPrerenderStatus !== 'ready') return;
+        e.preventDefault();
+        state.toggleLbmPlaying();
+        return;
+      }
+
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+
+      if (state.viewMode === 'lbm') {
+        if (!state.selectedLbmShapeId) return;
+        e.preventDefault();
+        state.removeLbmShape(state.selectedLbmShapeId);
+        return;
+      }
+
+      if (!state.selectedShapeId) return;
+      e.preventDefault();
+      state.removeShape(state.selectedShapeId);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   return (
     <div className="app">

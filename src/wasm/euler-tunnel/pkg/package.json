@@ -1,0 +1,15 @@
+{
+  "name": "euler-tunnel-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "euler_tunnel_wasm_bg.wasm",
+    "euler_tunnel_wasm.js",
+    "euler_tunnel_wasm.d.ts"
+  ],
+  "main": "euler_tunnel_wasm.js",
+  "types": "euler_tunnel_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

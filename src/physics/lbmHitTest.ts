@@ -77,27 +77,38 @@ export function findShapeAtGrid(
   return null;
 }
 
+type DrawRect = { x: number; y: number; w: number; h: number };
+
+export function screenToTunnelLocal(
+  clientX: number,
+  clientY: number,
+  surface: HTMLElement,
+  nx: number,
+  ny: number,
+  fitDrawRect: (w: number, h: number, aspect: number) => DrawRect,
+): { px: number; py: number; draw: DrawRect } | null {
+  const bounds = surface.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) return null;
+
+  const px = clientX - bounds.left;
+  const py = clientY - bounds.top;
+  const draw = fitDrawRect(bounds.width, bounds.height, nx / ny);
+
+  return { px, py, draw };
+}
+
 export function screenToGrid(
   clientX: number,
   clientY: number,
-  canvas: HTMLCanvasElement,
+  surface: HTMLElement,
   nx: number,
   ny: number,
-  fitDrawRect: (
-    w: number,
-    h: number,
-    aspect: number,
-  ) => { x: number; y: number; w: number; h: number },
+  fitDrawRect: (w: number, h: number, aspect: number) => DrawRect,
 ): { gx: number; gy: number } | null {
-  const bounds = canvas.getBoundingClientRect();
-  if (bounds.width <= 0 || bounds.height <= 0) return null;
+  const local = screenToTunnelLocal(clientX, clientY, surface, nx, ny, fitDrawRect);
+  if (!local) return null;
 
-  const scaleX = canvas.width / bounds.width;
-  const scaleY = canvas.height / bounds.height;
-  const px = (clientX - bounds.left) * scaleX;
-  const py = (clientY - bounds.top) * scaleY;
-
-  const draw = fitDrawRect(canvas.width, canvas.height, nx / ny);
+  const { px, py, draw } = local;
   if (
     px < draw.x ||
     px > draw.x + draw.w ||
@@ -118,26 +129,17 @@ export function screenToGrid(
 export function brushScreenCircle(
   clientX: number,
   clientY: number,
-  canvas: HTMLCanvasElement,
+  surface: HTMLElement,
   nx: number,
   ny: number,
   brushRadius: number,
   resolutionScale: number,
-  fitDrawRect: (
-    w: number,
-    h: number,
-    aspect: number,
-  ) => { x: number; y: number; w: number; h: number },
+  fitDrawRect: (w: number, h: number, aspect: number) => DrawRect,
 ): { cx: number; cy: number; r: number } | null {
-  const bounds = canvas.getBoundingClientRect();
-  if (bounds.width <= 0 || bounds.height <= 0) return null;
+  const local = screenToTunnelLocal(clientX, clientY, surface, nx, ny, fitDrawRect);
+  if (!local) return null;
 
-  const scaleX = canvas.width / bounds.width;
-  const scaleY = canvas.height / bounds.height;
-  const px = (clientX - bounds.left) * scaleX;
-  const py = (clientY - bounds.top) * scaleY;
-
-  const draw = fitDrawRect(canvas.width, canvas.height, nx / ny);
+  const { px, py, draw } = local;
   if (
     px < draw.x ||
     px > draw.x + draw.w ||

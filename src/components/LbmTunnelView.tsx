@@ -119,6 +119,7 @@ function renderFrame(
 
 export function LbmTunnelView() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
   const solverRef = useRef<LbmSolver | null>(null);
   const obstacleRef = useRef<Uint8Array | null>(null);
@@ -201,7 +202,6 @@ export function LbmTunnelView() {
     cy: number;
     r: number;
   } | null>(null);
-  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
   const [eulerLegendRange, setEulerLegendRange] = useState<{ vmin: number; vmax: number } | null>(
     null,
   );
@@ -673,11 +673,10 @@ export function LbmTunnelView() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const parent = wrapRef.current;
+    if (!canvas || !parent) return;
 
     const resize = () => {
-      const parent = canvas.parentElement;
-      if (!parent) return;
       const dpr = window.devicePixelRatio || 1;
       const w = parent.clientWidth;
       const h = parent.clientHeight;
@@ -689,12 +688,16 @@ export function LbmTunnelView() {
       if (ctx) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
-      setCanvasSize({ w, h });
       paintCurrent();
     };
     resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(parent);
     window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', resize);
+    };
   }, [paintCurrent]);
 
   useEffect(() => {
@@ -770,8 +773,8 @@ export function LbmTunnelView() {
 
   const updateBrushPreview = useCallback(
     (clientX: number, clientY: number) => {
-      const canvas = canvasRef.current;
-      if (!canvas || useSimStore.getState().lbmInteractionMode !== 'draw') {
+      const surface = wrapRef.current;
+      if (!surface || useSimStore.getState().lbmInteractionMode !== 'draw') {
         setBrushPreview(null);
         return;
       }
@@ -780,7 +783,7 @@ export function LbmTunnelView() {
         brushScreenCircle(
           clientX,
           clientY,
-          canvas,
+          surface,
           nx,
           ny,
           useSimStore.getState().lbmBrushRadius,
@@ -805,10 +808,10 @@ export function LbmTunnelView() {
   const applyDragAt = useCallback(
     (clientX: number, clientY: number) => {
       const drag = dragRef.current;
-      const canvas = canvasRef.current;
-      if (!drag || !canvas) return;
+      const surface = wrapRef.current;
+      if (!drag || !surface) return;
 
-      const grid = screenToGrid(clientX, clientY, canvas, nx, ny, fitDrawRect);
+      const grid = screenToGrid(clientX, clientY, surface, nx, ny, fitDrawRect);
       if (!grid) return;
 
       const deltaGx = (grid.gx - drag.startGx) / lbmResolutionScale;
@@ -858,10 +861,11 @@ export function LbmTunnelView() {
 
   const applyDrawAt = useCallback(
     (clientX: number, clientY: number, startStroke: boolean) => {
+      const surface = wrapRef.current;
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      if (!surface || !canvas) return;
 
-      const grid = screenToGrid(clientX, clientY, canvas, nx, ny, fitDrawRect);
+      const grid = screenToGrid(clientX, clientY, surface, nx, ny, fitDrawRect);
       if (!grid) return;
 
       const lx = grid.gx / lbmResolutionScale;
@@ -971,10 +975,11 @@ export function LbmTunnelView() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || showSolverPlaceholder) return;
+    const surface = wrapRef.current;
+    if (!canvas || !surface || showSolverPlaceholder) return;
 
     const onPointerDown = (e: PointerEvent) => {
-      const grid = screenToGrid(e.clientX, e.clientY, canvas, nx, ny, fitDrawRect);
+      const grid = screenToGrid(e.clientX, e.clientY, surface, nx, ny, fitDrawRect);
       if (!grid) return;
 
       if (useSimStore.getState().lbmInteractionMode === 'draw') {
@@ -1042,7 +1047,7 @@ export function LbmTunnelView() {
         return;
       }
 
-      const grid = screenToGrid(e.clientX, e.clientY, canvas, nx, ny, fitDrawRect);
+      const grid = screenToGrid(e.clientX, e.clientY, surface, nx, ny, fitDrawRect);
       if (!grid) {
         setHoveredLbmShapeId(null);
         return;
@@ -1138,7 +1143,11 @@ export function LbmTunnelView() {
       </div>
 
       <div className="lbm-stage">
-      <div className="lbm-canvas-wrap" style={{ aspectRatio: `${nx} / ${ny}` }}>
+      <div
+        ref={wrapRef}
+        className="lbm-canvas-wrap"
+        style={{ aspectRatio: `${nx} / ${ny}` }}
+      >
         {showSolverPlaceholder && (
           <div className="lbm-placeholder">
             <div className="lbm-placeholder-inner">
@@ -1209,27 +1218,23 @@ export function LbmTunnelView() {
             .filter(Boolean)
             .join(' ')}
         />
-        {brushPreview &&
-          !showSolverPlaceholder &&
-          lbmInteractionMode === 'draw' &&
-          canvasSize.w > 0 && (
-            <svg
-              className="lbm-brush-overlay"
-              viewBox={`0 0 ${canvasSize.w} ${canvasSize.h}`}
-              aria-hidden
-            >
-              <circle
-                cx={brushPreview.cx}
-                cy={brushPreview.cy}
-                r={brushPreview.r}
-                className={
-                  lbmDrawDensity === 'decrease'
-                    ? 'lbm-brush-outline erase'
-                    : 'lbm-brush-outline'
-                }
-              />
-            </svg>
-          )}
+        {brushPreview && !showSolverPlaceholder && lbmInteractionMode === 'draw' && (
+          <div className="lbm-brush-overlay" aria-hidden>
+            <div
+              className={
+                lbmDrawDensity === 'decrease'
+                  ? 'lbm-brush-circle erase'
+                  : 'lbm-brush-circle'
+              }
+              style={{
+                left: `${brushPreview.cx - brushPreview.r}px`,
+                top: `${brushPreview.cy - brushPreview.r}px`,
+                width: `${brushPreview.r * 2}px`,
+                height: `${brushPreview.r * 2}px`,
+              }}
+            />
+          </div>
+        )}
       </div>
       </div>
       {lbmPhysicsMode === 'lbm' &&

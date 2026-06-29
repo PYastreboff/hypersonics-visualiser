@@ -587,36 +587,31 @@ export function LbmTunnelView() {
     const { lbmDisplayMode, lbmPhysicsMode } = useSimStore.getState();
     const label = lbmDisplayModeLabel(lbmDisplayMode);
     if (!grid || !metric || !obstacle) {
-      if (hoverReadoutCacheRef.current !== null) {
-        hoverReadoutCacheRef.current = null;
-        setHoverReadout(null);
-      }
+      // Keep the last stable readout while a fresh metric frame is pending.
       return;
     }
 
     const idx = grid.gx * ny + grid.gy;
     if (idx < 0 || idx >= metric.length) {
-      const unavailable = `${label}: Updating…`;
-      if (unavailable !== hoverReadoutCacheRef.current) {
-        hoverReadoutCacheRef.current = unavailable;
-        setHoverReadout(unavailable);
+      return;
+    }
+
+    if (obstacle[idx]) {
+      const obstacleText = `${label}: Obstacle`;
+      if (obstacleText !== hoverReadoutCacheRef.current) {
+        hoverReadoutCacheRef.current = obstacleText;
+        setHoverReadout(obstacleText);
       }
       return;
     }
 
     const value = metric[idx];
     if (!Number.isFinite(value)) {
-      const invalid = obstacle[idx] ? `${label}: Obstacle` : `${label}: Updating…`;
-      if (invalid !== hoverReadoutCacheRef.current) {
-        hoverReadoutCacheRef.current = invalid;
-        setHoverReadout(invalid);
-      }
+      // Skip transient invalid samples instead of replacing with misleading placeholders.
       return;
     }
 
-    const next = obstacle[idx]
-      ? `${label}: Obstacle`
-      : `${label}: ${formatLbmLegendValue(lbmDisplayMode, value, lbmPhysicsMode)} · (${grid.gx}, ${grid.gy})`;
+    const next = `${label}: ${formatLbmLegendValue(lbmDisplayMode, value, lbmPhysicsMode)} · (${grid.gx}, ${grid.gy})`;
 
     if (next === hoverReadoutCacheRef.current) return;
     hoverReadoutCacheRef.current = next;

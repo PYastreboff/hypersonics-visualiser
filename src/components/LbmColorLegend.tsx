@@ -108,14 +108,14 @@ export function LbmColorLegend({
               className="lbm-legend-tick"
               style={{ left: `${(i / (ticks.length - 1)) * 100}%` }}
             >
-              {formatLbmLegendValue(displayMode, value)}
+              {formatLbmLegendValue(displayMode, value, physicsMode)}
             </span>
           ))}
         </div>
       )}
       <span className="lbm-legend-unit">
         {physicsMode === 'euler' && displayMode === 'pressure'
-          ? 'Pa — low to high'
+          ? 'kPa — low to high'
           : lbmLegendUnitLabel(displayMode)}
       </span>
     </div>

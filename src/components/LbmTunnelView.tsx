@@ -593,11 +593,11 @@ export function LbmTunnelView() {
     }
 
     const idx = grid.gx * ny + grid.gy;
-    const { lbmDisplayMode } = useSimStore.getState();
+    const { lbmDisplayMode, lbmPhysicsMode } = useSimStore.getState();
     const label = lbmDisplayModeLabel(lbmDisplayMode);
     const next = obstacle[idx]
       ? `${label}: Obstacle`
-      : `${label}: ${formatLbmLegendValue(lbmDisplayMode, metric[idx])} · (${grid.gx}, ${grid.gy})`;
+      : `${label}: ${formatLbmLegendValue(lbmDisplayMode, metric[idx], lbmPhysicsMode)} · (${grid.gx}, ${grid.gy})`;
 
     if (next === hoverReadoutCacheRef.current) return;
     hoverReadoutCacheRef.current = next;

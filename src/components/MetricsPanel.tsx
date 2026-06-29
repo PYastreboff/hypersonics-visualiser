@@ -30,7 +30,7 @@ export function MetricsPanel() {
           <span className="label" title="Free-stream dynamic pressure">
             q∞
           </span>
-          <span className="value">{metrics.dynamicPressure.toFixed(0)} Pa</span>
+          <span className="value">{(metrics.dynamicPressure / 1000).toFixed(1)} kPa</span>
         </div>
         <div className="metric-card">
           <span className="label">Stagnation T</span>

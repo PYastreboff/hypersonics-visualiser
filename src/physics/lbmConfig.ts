@@ -137,6 +137,7 @@ export function formatLbmSpeedMs(speed: number, decimals = 2): string {
 export function formatLbmLegendValue(
   displayMode: LbmDisplayMode,
   value: number,
+  physicsMode: 'lbm' | 'euler' = 'lbm',
 ): string {
   if (displayMode === 'velocity') {
     return formatLbmSpeedMs(value, 3);
@@ -146,6 +147,9 @@ export function formatLbmLegendValue(
   }
   if (displayMode === 'temperature') {
     return `${value.toFixed(0)} K`;
+  }
+  if (displayMode === 'pressure' && physicsMode === 'euler') {
+    return `${(value / 1000).toFixed(1)} kPa`;
   }
   return value.toFixed(4);
 }

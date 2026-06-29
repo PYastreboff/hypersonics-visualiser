@@ -110,6 +110,7 @@ body,
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  contain: layout style;
 }
 
 .sidebar.right {
@@ -124,6 +125,8 @@ body,
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  contain: layout paint;
+  isolation: isolate;
 }
 
 .scene-container {
@@ -148,6 +151,7 @@ body,
 .lbm-title-bar,
 .lbm-scrubber,
 .lbm-color-legend,
+.lbm-hover-readout,
 .lbm-drag-hint {
   flex-shrink: 0;
 }
@@ -168,6 +172,81 @@ body,
   border: 1px solid var(--border);
   border-radius: 4px;
   overflow: hidden;
+}
+
+.lbm-tunnel-dim {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+  z-index: 3;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.lbm-tunnel-dim-value {
+  font-weight: 600;
+}
+
+.lbm-tunnel-dim-axis {
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.75;
+}
+
+.lbm-tunnel-dim-length {
+  left: 50%;
+  bottom: 5px;
+  transform: translateX(-50%);
+}
+
+.lbm-tunnel-dim-height {
+  right: 6px;
+  top: 50%;
+  left: auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  transform: translateY(-50%);
+  line-height: 1.1;
+}
+
+.lbm-tunnel-dim-height-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.lbm-tunnel-dim-arrow {
+  font-size: 0.65rem;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.lbm-tunnel-dim-value-vertical,
+.lbm-tunnel-dim-axis-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  /* Bottom-to-top along the dimension; readable from outside the right edge. */
+  transform: scale(-1, -1);
+}
+
+.lbm-tunnel-dim-value-vertical {
+  padding: 2px 0;
+  letter-spacing: 0.04em;
+}
+
+.lbm-tunnel-dim-axis-vertical {
+  letter-spacing: 0.12em;
 }
 
 .lbm-canvas {
@@ -413,6 +492,15 @@ body,
   padding: 0.2rem 0.45rem;
   font-size: 0.95rem;
   line-height: 1;
+}
+
+.lbm-hover-readout {
+  font-size: 0.75rem;
+  color: var(--text);
+  margin-top: 0.4rem;
+  text-align: center;
+  min-height: 1.1rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .lbm-drag-hint {
@@ -1012,6 +1100,17 @@ select {
 
 .hf-status.success {
   color: var(--success);
+}
+
+.cd-readout {
+  margin-bottom: 0.35rem;
+}
+
+.cd-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 
 .hf-status.error {

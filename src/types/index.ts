@@ -19,13 +19,15 @@ export type SimMode = 'preview' | 'highFidelity';
 
 export type ViewMode = '3d' | 'lbm';
 
-export type LbmDisplayMode = 'velocity' | 'pressure' | 'mach';
+export type LbmDisplayMode = 'velocity' | 'pressure' | 'mach' | 'temperature';
 
 export type LbmPhysicsMode = 'lbm' | 'euler';
 
 export type LbmRunMode = 'live' | 'prerender';
 
 export type LbmPrerenderStatus = 'idle' | 'running' | 'ready' | 'error' | 'cancelled';
+
+export type EulerRunMode = 'live' | 'steady';
 
 export type EulerTunnelStatus = 'idle' | 'running' | 'ready' | 'error' | 'cancelled';
 

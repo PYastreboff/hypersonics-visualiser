@@ -1,3 +1,11 @@
+import { GAMMA } from '@/physics/constants';
+import {
+  densityAtAltitude,
+  speedOfSound,
+  temperatureAtAltitude,
+} from '@/physics/atmosphere';
+import type { LbmDisplayMode } from '@/types';
+
 export const LBM_FRAME_MS = 30;
 export const LBM_DEFAULT_TUNNEL_NX = 300;
 export const LBM_DEFAULT_TUNNEL_NY = 100;
@@ -40,25 +48,70 @@ export function lbmResolutionLabel(
   return `${tier} — ${nx} × ${ny} cells`;
 }
 
-export function lbmDisplayModeLabel(mode: 'velocity' | 'pressure' | 'mach'): string {
+export function lbmDisplayModeLabel(mode: LbmDisplayMode): string {
   if (mode === 'mach') return 'Mach';
+  if (mode === 'temperature') return 'Temperature';
   return mode === 'velocity' ? 'Velocity' : 'Pressure';
 }
 
 export function lbmPhysicsModeLabel(mode: 'lbm' | 'euler'): string {
-  return mode === 'lbm' ? 'LBM (low Ma)' : 'Euler 2D (compressible)';
+  return mode === 'lbm' ? 'Low Speed (LBM)' : 'MACH (Euler)';
 }
 
 export function lbmRunModeLabel(mode: 'live' | 'prerender'): string {
   return mode === 'live' ? 'Live' : 'Pre-render';
 }
 
-import { GAMMA } from '@/physics/constants';
-import {
-  densityAtAltitude,
-  speedOfSound,
-  temperatureAtAltitude,
-} from '@/physics/atmosphere';
+export function eulerRunModeLabel(mode: 'live' | 'steady'): string {
+  return mode === 'live' ? 'Live' : 'Steady solve';
+}
+
+/** Pseudo-time steps per animation frame for live Euler convergence. */
+export function eulerLiveStepsPerFrame(nx: number, ny: number): number {
+  const cells = nx * ny;
+  return Math.max(8, Math.min(48, Math.round(cells / 900)));
+}
+
+export const EULER_FRAME_MS = 30;
+
+/** Target wall-clock interval between live simulation frames (LBM and Euler). */
+export const LIVE_FRAME_MS = LBM_FRAME_MS;
+
+export function liveSimTimeMsFromFrames(frames: number): number {
+  return frames * LIVE_FRAME_MS;
+}
+
+/** True when simulation time is keeping up with wall clock (≈ one frame behind). */
+export function isLiveSimRealTime(simMs: number, wallMs: number): boolean {
+  if (simMs < LIVE_FRAME_MS) return false;
+  return wallMs - simMs <= LIVE_FRAME_MS * 2;
+}
+
+export function formatPhysicalSimTime(seconds: number): string {
+  const s = Math.max(0, seconds);
+  if (s < 1e-9) return '0 µs';
+  if (s < 1e-3) {
+    const us = s * 1e6;
+    return us < 10 ? `${us.toFixed(1)} µs` : `${Math.round(us)} µs`;
+  }
+  if (s < 1) {
+    const ms = s * 1e3;
+    if (ms < 10) return `${ms.toFixed(2)} ms`;
+    if (ms < 100) return `${ms.toFixed(1)} ms`;
+    return `${Math.round(ms)} ms`;
+  }
+  return `${s.toFixed(2)} s`;
+}
+
+export function formatEulerElapsedMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+export function formatLiveSimTime(simMs: number, realTime: boolean): string {
+  const base = formatEulerElapsedMs(simMs);
+  return realTime ? `${base} · real time` : base;
+}
 
 export const EULER_MIN_MACH = 0;
 export const EULER_MAX_MACH = 12;
@@ -82,7 +135,7 @@ export function formatLbmSpeedMs(speed: number, decimals = 2): string {
 }
 
 export function formatLbmLegendValue(
-  displayMode: 'velocity' | 'pressure' | 'mach',
+  displayMode: LbmDisplayMode,
   value: number,
 ): string {
   if (displayMode === 'velocity') {
@@ -91,12 +144,16 @@ export function formatLbmLegendValue(
   if (displayMode === 'mach') {
     return value.toFixed(2);
   }
+  if (displayMode === 'temperature') {
+    return `${value.toFixed(0)} K`;
+  }
   return value.toFixed(4);
 }
 
-export function lbmLegendUnitLabel(displayMode: 'velocity' | 'pressure' | 'mach'): string {
+export function lbmLegendUnitLabel(displayMode: LbmDisplayMode): string {
   if (displayMode === 'velocity') return 'm/s — low to high';
   if (displayMode === 'mach') return 'Mach — low to high';
+  if (displayMode === 'temperature') return 'K — low to high';
   return 'Lattice pressure — low to high';
 }
 

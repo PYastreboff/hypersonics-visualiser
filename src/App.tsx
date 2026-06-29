@@ -37,7 +37,11 @@ export default function App() {
       if (e.code === 'Space') {
         if (blocksDeleteShortcut(e.target)) return;
         if (state.viewMode !== 'lbm') return;
-        if (state.lbmRunMode === 'prerender' && state.lbmPrerenderStatus !== 'ready') return;
+        if (state.lbmPhysicsMode === 'euler') {
+          if (state.eulerRunMode === 'steady' && state.eulerTunnelStatus === 'running') return;
+        } else if (state.lbmRunMode === 'prerender' && state.lbmPrerenderStatus !== 'ready') {
+          return;
+        }
         e.preventDefault();
         state.toggleLbmPlaying();
         return;

@@ -7,6 +7,7 @@ import { GAMMA } from '@/physics/constants';
 import {
   fluidVelocityMaxDelta,
   runEulerTunnel,
+  eulerTemperatureField,
   type EulerTunnelConfig,
   type EulerTunnelResult,
 } from '@/physics/eulerTunnelSolver';
@@ -92,7 +93,8 @@ export async function runEulerTunnelGpu(
 
     onProgress?.(1, 'gpu');
     const { velocity, machField, pressure } = await sim.buildOutput(obstacle);
-    return { nx, ny, mach, altitude, velocity, machField, pressure };
+    const temperature = eulerTemperatureField(velocity, machField, obstacle, altitude);
+    return { nx, ny, mach, altitude, velocity, machField, pressure, temperature };
   } finally {
     sim.destroy();
   }
@@ -138,6 +140,7 @@ export async function runEulerTunnelWasmPath(
     velocity: packed.velocity,
     machField: packed.machField,
     pressure: packed.pressure,
+    temperature: eulerTemperatureField(packed.velocity, packed.machField, obstacle, altitude),
   };
 }
 

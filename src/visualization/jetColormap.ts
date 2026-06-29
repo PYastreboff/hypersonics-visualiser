@@ -1,5 +1,7 @@
 import type { LbmDisplayMode, LbmPhysicsMode } from '@/types';
 import { eulerFreestreamPressure, eulerFreestreamSpeed } from '@/physics/lbmConfig';
+import { GAMMA } from '@/physics/constants';
+import { temperatureAtAltitude } from '@/physics/atmosphere';
 
 /** Matplotlib-style jet colormap (t in [0, 1]). */
 export function jetColor(t: number): [number, number, number] {
@@ -148,6 +150,12 @@ export function tunnelMetricRange(
     }
     if (displayMode === 'mach') {
       return { vmin: 0, vmax: Math.max(eulerMach * 1.25, 0.5) };
+    }
+    if (displayMode === 'temperature') {
+      const t0 = temperatureAtAltitude(eulerAltitude);
+      const tStag = t0 * (1 + 0.5 * (GAMMA - 1) * eulerMach * eulerMach);
+      const pad = Math.max((tStag - t0) * 0.15, 5);
+      return { vmin: Math.max(0, t0 - pad), vmax: tStag + pad };
     }
     const halfSpan = Math.max(p0 * 0.08 * Math.max(eulerMach, 0.1), 500);
     return { vmin: p0 - halfSpan, vmax: p0 + halfSpan };

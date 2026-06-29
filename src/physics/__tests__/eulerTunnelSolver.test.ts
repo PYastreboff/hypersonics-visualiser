@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EulerTunnelSimulator,
   fluidVelocityMaxDelta,
   getEulerTunnelMetric,
   runEulerTunnel,
@@ -30,6 +31,8 @@ describe('runEulerTunnel', () => {
     expect(inlet).toBeGreaterThan(50);
     expect(result.machField[1 * ny + 15]).toBeGreaterThan(0.05);
     expect(getEulerTunnelMetric(result, 'mach')).toBe(result.machField);
+    expect(result.temperature[1 * ny + 15]).toBeGreaterThan(200);
+    expect(getEulerTunnelMetric(result, 'temperature')).toBe(result.temperature);
   });
 
   it('zeros velocity inside obstacle cells', () => {
@@ -66,5 +69,96 @@ describe('runEulerTunnel', () => {
     expect(progress).toBe(1);
     expect(early.velocity[1 * ny + 15]).toBeCloseTo(forced.velocity[1 * ny + 15], 0);
     expect(early.machField[1 * ny + 15]).toBeGreaterThan(0.05);
+  });
+});
+
+describe('EulerTunnelSimulator', () => {
+  it('steps incrementally toward the same steady field as runEulerTunnel', () => {
+    const nx = 60;
+    const ny = 30;
+    const obstacle = new Uint8Array(nx * ny);
+    const config = { nx, ny, obstacle, mach: 0.2, altitude: 0, steps: 120 };
+
+    const sim = new EulerTunnelSimulator(config);
+    while (!sim.converged && sim.stepIndex < sim.maxSteps) {
+      sim.step();
+    }
+
+    const batch = runEulerTunnel(config, () => {}, () => false);
+    expect(sim.velocity[1 * ny + 15]).toBeCloseTo(batch.velocity[1 * ny + 15], 0);
+    expect(sim.progress).toBe(1);
+  });
+
+  it('updates obstacles and flow params without cold-restarting', () => {
+    const nx = 40;
+    const ny = 20;
+    const obstacle = new Uint8Array(nx * ny);
+    const sim = new EulerTunnelSimulator({ nx, ny, obstacle, mach: 0.2, altitude: 0, steps: 40 });
+    for (let i = 0; i < 40; i++) sim.step();
+    sim.converged = true;
+
+    const interior = 10 * ny + 10;
+    const neighborId = 10 * ny + 11;
+    for (let i = 0; i < 40; i++) sim.step();
+
+    obstacle[interior] = 1;
+    sim.updateObstacle(obstacle);
+    expect(sim.converged).toBe(false);
+
+    const neighborPressure = sim.pressure[neighborId];
+    obstacle[interior] = 0;
+    sim.updateObstacle(obstacle);
+    expect(sim.pressure[interior]).toBeCloseTo(neighborPressure, 0);
+
+    sim.converged = true;
+    sim.updateFlowParams(0.5, 0);
+    expect(sim.converged).toBe(false);
+    expect(sim.mach).toBe(0.5);
+    expect(sim.buildResult().velocity[10]).toBeGreaterThan(100);
+  });
+
+  it('continuous mode keeps stepping past maxSteps and after tolerance convergence', () => {
+    const nx = 40;
+    const ny = 20;
+    const obstacle = new Uint8Array(nx * ny);
+    const sim = new EulerTunnelSimulator({
+      nx,
+      ny,
+      obstacle,
+      mach: 0.2,
+      altitude: 0,
+      steps: 20,
+      continuous: true,
+    });
+
+    for (let i = 0; i < 50; i++) sim.step();
+    expect(sim.stepIndex).toBe(50);
+    expect(sim.converged).toBe(false);
+
+    obstacle[10 * ny + 10] = 1;
+    sim.updateObstacle(obstacle);
+    const stepsBefore = sim.stepIndex;
+    sim.steps(5);
+    expect(sim.stepIndex).toBe(stepsBefore + 5);
+    expect(sim.converged).toBe(false);
+    expect(sim.simTimeS).toBeGreaterThan(0);
+  });
+
+  it('accumulates physical simulation time from CFL timesteps', () => {
+    const nx = 60;
+    const ny = 20;
+    const obstacle = new Uint8Array(nx * ny);
+    const sim = new EulerTunnelSimulator({
+      nx,
+      ny,
+      obstacle,
+      mach: 9,
+      altitude: 0,
+      continuous: true,
+    });
+
+    sim.steps(500);
+    expect(sim.simTimeS).toBeGreaterThan(1e-6);
+    expect(sim.simTimeS).toBeLessThan(0.01);
   });
 });

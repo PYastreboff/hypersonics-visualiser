@@ -9,6 +9,7 @@ import type {
   LbmPhysicsMode,
   LbmPrerenderStatus,
   EulerTunnelStatus,
+  EulerRunMode,
   LbmRunMode,
   LbmShapeInput,
   PlacedShape,
@@ -75,7 +76,10 @@ interface SimState {
   lbmEulerAltitude: number;
   eulerTunnelStatus: EulerTunnelStatus;
   eulerTunnelProgress: number;
+  tunnelCd: number | null;
   eulerTunnelSeed: number;
+  eulerFlowRevision: number;
+  eulerRunMode: EulerRunMode;
   lbmResolutionScale: number;
   lbmTunnelNx: number;
   lbmTunnelNy: number;
@@ -94,6 +98,7 @@ interface SimState {
   lbmInteractionMode: LbmInteractionMode;
   lbmBrushRadius: number;
   lbmDrawDensity: LbmDrawDensity;
+  lbmShowTunnelDims: boolean;
 
   setFlowParam: <K extends keyof FlowParams>(key: K, value: FlowParams[K]) => void;
   addShape: (kind: ShapeKind) => void;
@@ -117,16 +122,20 @@ interface SimState {
   setSliceField: (field: 'density' | 'temperature' | 'mach') => void;
   toggleTransition: () => void;
   toggleBoundaryLayer: () => void;
+  toggleLbmShowTunnelDims: () => void;
   setLbmDisplayMode: (mode: LbmDisplayMode) => void;
   setLbmPhysicsMode: (mode: LbmPhysicsMode) => void;
   setLbmEulerMach: (mach: number) => void;
   setLbmEulerAltitude: (altitude: number) => void;
+  commitEulerFlowParams: () => void;
   setEulerTunnelState: (
     state: Partial<{
       status: EulerTunnelStatus;
       progress: number;
+      cd: number | null;
     }>,
   ) => void;
+  setEulerRunMode: (mode: EulerRunMode) => void;
   runEulerTunnelSimulation: () => void;
   setLbmWindSpeed: (speed: number) => void;
   setLbmFluidDensity: (density: number) => void;
@@ -188,7 +197,10 @@ export const useSimStore = create<SimState>((set, get) => ({
   lbmEulerAltitude: 0,
   eulerTunnelStatus: 'idle',
   eulerTunnelProgress: 0,
+  tunnelCd: null,
   eulerTunnelSeed: 0,
+  eulerFlowRevision: 0,
+  eulerRunMode: 'live',
   lbmResolutionScale: 1,
   lbmTunnelNx: 300,
   lbmTunnelNy: 100,
@@ -207,6 +219,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   lbmInteractionMode: 'select',
   lbmBrushRadius: 2,
   lbmDrawDensity: 'increase',
+  lbmShowTunnelDims: true,
 
   setFlowParam: (key, value) => {
     set((s) => {
@@ -304,6 +317,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   setSliceField: (field) => set({ sliceField: field }),
   toggleTransition: () => set((s) => ({ showTransition: !s.showTransition })),
   toggleBoundaryLayer: () => set((s) => ({ showBoundaryLayer: !s.showBoundaryLayer })),
+  toggleLbmShowTunnelDims: () => set((s) => ({ lbmShowTunnelDims: !s.lbmShowTunnelDims })),
   setLbmDisplayMode: (mode) => set({ lbmDisplayMode: mode }),
   setLbmPhysicsMode: (mode) =>
     set((s) => ({
@@ -311,28 +325,34 @@ export const useSimStore = create<SimState>((set, get) => ({
       lbmDisplayMode:
         mode === 'euler' && s.lbmDisplayMode === 'velocity'
           ? 'mach'
-          : mode === 'lbm' && s.lbmDisplayMode === 'mach'
+          : mode === 'lbm' && (s.lbmDisplayMode === 'mach' || s.lbmDisplayMode === 'temperature')
             ? 'velocity'
             : s.lbmDisplayMode,
       eulerTunnelStatus: mode === 'euler' ? 'idle' : s.eulerTunnelStatus,
       eulerTunnelSeed: mode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
     })),
   setLbmEulerMach: (mach) =>
-    set((s) => ({
-      lbmEulerMach: clampEulerMach(mach),
-      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
-      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
-    })),
+    set({ lbmEulerMach: clampEulerMach(mach) }),
   setLbmEulerAltitude: (altitude) =>
-    set((s) => ({
-      lbmEulerAltitude: Math.min(50000, Math.max(0, altitude)),
-      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
-      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
-    })),
+    set({ lbmEulerAltitude: Math.min(50000, Math.max(0, altitude)) }),
+  commitEulerFlowParams: () =>
+    set((s) =>
+      s.lbmPhysicsMode === 'euler'
+        ? { eulerFlowRevision: s.eulerFlowRevision + 1 }
+        : {},
+    ),
   setEulerTunnelState: (state) =>
     set((s) => ({
       eulerTunnelStatus: state.status ?? s.eulerTunnelStatus,
       eulerTunnelProgress: state.progress ?? s.eulerTunnelProgress,
+      tunnelCd: state.cd !== undefined ? state.cd : s.tunnelCd,
+    })),
+  setEulerRunMode: (mode) =>
+    set((s) => ({
+      eulerRunMode: mode,
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
+      lbmPlaying: s.lbmPhysicsMode === 'euler' && mode === 'live',
     })),
   runEulerTunnelSimulation: () =>
     set((s) => ({
@@ -393,7 +413,9 @@ export const useSimStore = create<SimState>((set, get) => ({
         s.lbmPhysicsMode === 'lbm' && s.lbmRunMode === 'prerender'
           ? s.lbmSeed + 1
           : s.lbmSeed,
-      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
+      ...(s.lbmPhysicsMode === 'euler' && s.eulerRunMode === 'steady'
+        ? { eulerTunnelSeed: s.eulerTunnelSeed + 1, eulerTunnelStatus: 'idle' as const }
+        : {}),
     })),
   updateLbmShapePosition: (id, cx, cy) =>
     set((s) => ({
@@ -438,8 +460,6 @@ export const useSimStore = create<SimState>((set, get) => ({
         s.lbmPhysicsMode === 'lbm' && s.lbmRunMode === 'prerender'
           ? s.lbmSeed + 1
           : s.lbmSeed,
-      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
-      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
     })),
   setSelectedLbmShapeId: (id) => set({ selectedLbmShapeId: id }),
   setHoveredLbmShapeId: (id) => set({ hoveredLbmShapeId: id }),
@@ -485,6 +505,7 @@ export const useSimStore = create<SimState>((set, get) => ({
         return {
           eulerTunnelSeed: s.eulerTunnelSeed + 1,
           eulerTunnelStatus: 'idle',
+          lbmPlaying: s.eulerRunMode === 'live',
         };
       }
       if (s.lbmRunMode === 'prerender') {

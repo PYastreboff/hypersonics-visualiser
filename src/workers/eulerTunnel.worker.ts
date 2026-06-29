@@ -63,6 +63,7 @@ self.onmessage = async (e: MessageEvent) => {
     const velocity = new Float32Array(result.velocity);
     const machField = new Float32Array(result.machField);
     const pressure = new Float32Array(result.pressure);
+    const temperature = new Float32Array(result.temperature);
 
     self.postMessage(
       {
@@ -74,10 +75,11 @@ self.onmessage = async (e: MessageEvent) => {
         velocity,
         machField,
         pressure,
+        temperature,
         backend,
       },
       {
-        transfer: [velocity.buffer, machField.buffer, pressure.buffer],
+        transfer: [velocity.buffer, machField.buffer, pressure.buffer, temperature.buffer],
       },
     );
   } catch (err) {

@@ -1,5 +1,6 @@
+import { useCallback, useEffect, useRef } from 'react';
 import { useSimStore } from '@/store/simStore';
-import type { LbmShapeInput, LbmShapeType } from '@/types';
+import type { LbmShapeInput, LbmShapeType, LbmDisplayMode } from '@/types';
 import {
   LBM_RESOLUTION_SCALES,
   LBM_MIN_TUNNEL_NX,
@@ -18,6 +19,7 @@ import {
   eulerFreestreamSpeed,
 } from '@/physics/lbmConfig';
 import { detectRegime, regimeLabel } from '@/physics/regimes';
+import { formatDragCoefficient } from '@/physics/tunnelDrag';
 import { nextLbmShapeId } from '@/physics/lbmObstacles';
 import { SettingLabel } from './SettingLabel';
 import { NumInput } from './NumInput';
@@ -282,9 +284,12 @@ export function LbmControlPanel() {
     lbmPrerenderStatus,
     eulerTunnelStatus,
     eulerTunnelProgress,
+    tunnelCd,
+    eulerRunMode,
     lbmInteractionMode,
     lbmBrushRadius,
     lbmDrawDensity,
+    lbmShowTunnelDims,
     selectedLbmShapeId,
     hoveredLbmShapeId,
     setLbmPhysicsMode,
@@ -292,12 +297,14 @@ export function LbmControlPanel() {
     setLbmFluidDensity,
     setLbmEulerMach,
     setLbmEulerAltitude,
+    commitEulerFlowParams,
     setLbmPlaybackSeconds,
     setLbmDisplayMode,
     setLbmResolutionScale,
     setLbmTunnelNx,
     setLbmTunnelNy,
     setLbmRunMode,
+    setEulerRunMode,
     updateLbmShape,
     updateLbmShapePosition,
     commitLbmShapeLayout,
@@ -310,11 +317,48 @@ export function LbmControlPanel() {
     setLbmInteractionMode,
     setLbmBrushRadius,
     setLbmDrawDensity,
+    toggleLbmShowTunnelDims,
     setSelectedLbmShapeId,
   } = useSimStore();
 
   const isEuler = lbmPhysicsMode === 'euler';
   const eulerU0 = eulerFreestreamSpeed(lbmEulerMach, lbmEulerAltitude);
+  const eulerFlowCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushEulerFlowCommit = useCallback(() => {
+    if (eulerFlowCommitTimerRef.current) {
+      clearTimeout(eulerFlowCommitTimerRef.current);
+      eulerFlowCommitTimerRef.current = null;
+    }
+    commitEulerFlowParams();
+  }, [commitEulerFlowParams]);
+
+  const scheduleEulerFlowCommit = useCallback(() => {
+    if (eulerFlowCommitTimerRef.current) {
+      clearTimeout(eulerFlowCommitTimerRef.current);
+    }
+    eulerFlowCommitTimerRef.current = setTimeout(() => {
+      eulerFlowCommitTimerRef.current = null;
+      commitEulerFlowParams();
+    }, 450);
+  }, [commitEulerFlowParams]);
+
+  useEffect(
+    () => () => {
+      if (eulerFlowCommitTimerRef.current) {
+        clearTimeout(eulerFlowCommitTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const onEulerMachChange = useCallback(
+    (mach: number) => {
+      setLbmEulerMach(mach);
+      scheduleEulerFlowCommit();
+    },
+    [scheduleEulerFlowCommit, setLbmEulerMach],
+  );
 
   const effectiveGrid = lbmGridSize(lbmTunnelNx, lbmTunnelNy, lbmResolutionScale);
 
@@ -346,8 +390,8 @@ export function LbmControlPanel() {
             value={lbmPhysicsMode}
             onChange={(e) => setLbmPhysicsMode(e.target.value as 'lbm' | 'euler')}
           >
-            <option value="lbm">LBM (low Ma)</option>
-            <option value="euler">Euler 2D (compressible)</option>
+            <option value="lbm">Low Speed (LBM)</option>
+            <option value="euler">MACH (Euler)</option>
           </select>
         </SettingLabel>
 
@@ -391,7 +435,9 @@ export function LbmControlPanel() {
                 max={EULER_MAX_MACH}
                 step={0.05}
                 value={lbmEulerMach}
-                onChange={(e) => setLbmEulerMach(parseFloat(e.target.value))}
+                onChange={(e) => onEulerMachChange(parseFloat(e.target.value))}
+                onPointerUp={flushEulerFlowCommit}
+                onKeyUp={flushEulerFlowCommit}
               />
               <span className="value">
                 Ma {lbmEulerMach.toFixed(2)} ({regimeLabel(detectRegime(lbmEulerMach))}) ·{' '}
@@ -403,6 +449,7 @@ export function LbmControlPanel() {
               <NumInput
                 value={lbmEulerAltitude}
                 onChange={setLbmEulerAltitude}
+                onCommit={flushEulerFlowCommit}
                 min={0}
                 max={50000}
                 step={500}
@@ -411,14 +458,28 @@ export function LbmControlPanel() {
           </>
         )}
 
+        <SettingLabel
+          label="Drag coefficient (Cd)"
+          tip="Dimensionless drag: force divided by (dynamic pressure × reference length). Lower Cd means less resistance. Estimated from the simulated pressure field on obstacles (pressure drag only)."
+        >
+          <p className="hf-status cd-readout">
+            <strong>Cd {tunnelCd !== null ? formatDragCoefficient(tunnelCd) : '—'}</strong>
+          </p>
+          <p className="cd-hint">
+            Typical values: sphere ~0.44 (subsonic), streamlined body ~0.05–0.15, blunt hypersonic body
+            often 1+. Updates as the flow field changes.
+          </p>
+        </SettingLabel>
+
         <SettingLabel label="Colour field" tip="What to show in the flow visualisation">
           <select
             value={lbmDisplayMode}
-            onChange={(e) => setLbmDisplayMode(e.target.value as 'velocity' | 'pressure' | 'mach')}
+            onChange={(e) => setLbmDisplayMode(e.target.value as LbmDisplayMode)}
           >
             <option value="velocity">Velocity magnitude</option>
             {isEuler && <option value="mach">Mach</option>}
             <option value="pressure">Pressure</option>
+            {isEuler && <option value="temperature">Temperature</option>}
           </select>
         </SettingLabel>
 
@@ -507,6 +568,17 @@ export function LbmControlPanel() {
         </SettingLabel>
 
         <SettingLabel
+          label="Physical dimensions"
+          tip="Show length and height labels (metres) on the tunnel viewport"
+        >
+          <input
+            type="checkbox"
+            checked={lbmShowTunnelDims}
+            onChange={toggleLbmShowTunnelDims}
+          />
+        </SettingLabel>
+
+        <SettingLabel
           label="Simulation quality"
           tip="Higher quality is sharper but slower. Pre-render at Ultra or Extreme can take a while."
         >
@@ -524,10 +596,29 @@ export function LbmControlPanel() {
 
         <SettingLabel
           label="Run mode"
-          tip="Live steps physics in real time. Pre-render computes all frames first for smooth playback."
+          tip={
+            isEuler
+              ? 'Live steps the Euler solver continuously in real time. Steady solve runs to convergence in a background worker (WASM/CPU).'
+              : 'Live steps physics in real time. Pre-render computes all frames first for smooth playback.'
+          }
         >
           {isEuler ? (
-            <p className="lbm-custom-shape-note">Euler solves to a steady snapshot in a background worker.</p>
+            <div className="mode-toggle">
+              <button
+                type="button"
+                className={eulerRunMode === 'live' ? 'active' : ''}
+                onClick={() => setEulerRunMode('live')}
+              >
+                Live
+              </button>
+              <button
+                type="button"
+                className={eulerRunMode === 'steady' ? 'active' : ''}
+                onClick={() => setEulerRunMode('steady')}
+              >
+                Steady solve
+              </button>
+            </div>
           ) : (
           <div className="mode-toggle">
             <button
@@ -551,11 +642,14 @@ export function LbmControlPanel() {
         {!isEuler && lbmRunMode === 'prerender' && lbmPrerenderStatus === 'ready' && (
           <p className="hf-status success">Pre-render complete — ready to play</p>
         )}
-        {isEuler && eulerTunnelStatus === 'ready' && (
-          <p className="hf-status success">Euler solve complete</p>
+        {isEuler && eulerRunMode === 'steady' && eulerTunnelStatus === 'ready' && (
+          <p className="hf-status success">Euler steady solve complete</p>
         )}
-        {isEuler && eulerTunnelStatus === 'running' && (
+        {isEuler && eulerRunMode === 'steady' && eulerTunnelStatus === 'running' && (
           <p className="hf-status">Solving Euler… {Math.round(eulerTunnelProgress * 100)}%</p>
+        )}
+        {isEuler && eulerRunMode === 'live' && lbmPlaying && (
+          <p className="hf-status">Live solving…</p>
         )}
       </div>
 
@@ -673,14 +767,24 @@ export function LbmControlPanel() {
 
       <div className="lbm-controls-row">
         {isEuler ? (
-          <button
-            type="button"
-            className="hf-run-btn"
-            onClick={runEulerTunnelSimulation}
-            disabled={eulerTunnelStatus === 'running'}
-          >
-            {eulerTunnelStatus === 'running' ? 'Solving…' : 'Run Euler'}
-          </button>
+          eulerRunMode === 'live' ? (
+            <button
+              type="button"
+              className="hf-run-btn"
+              onClick={toggleLbmPlaying}
+            >
+              {lbmPlaying ? 'Pause' : 'Play'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="hf-run-btn"
+              onClick={runEulerTunnelSimulation}
+              disabled={eulerTunnelStatus === 'running'}
+            >
+              {eulerTunnelStatus === 'running' ? 'Solving…' : 'Run Euler'}
+            </button>
+          )
         ) : (
           <button
             type="button"

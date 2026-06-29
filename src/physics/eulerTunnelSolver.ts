@@ -1,9 +1,11 @@
-import { GAMMA } from '@/physics/constants';
+import { GAMMA, R_AIR } from '@/physics/constants';
 import {
   densityAtAltitude,
   speedOfSound,
   temperatureAtAltitude,
 } from '@/physics/atmosphere';
+import type { LbmDisplayMode } from '@/types';
+import { computeEulerTunnelDrag } from '@/physics/tunnelDrag';
 
 export interface EulerTunnelConfig {
   nx: number;
@@ -14,6 +16,8 @@ export interface EulerTunnelConfig {
   steps?: number;
   /** Relative L∞ velocity change threshold for early stop (default 1e-4). */
   convergenceTolerance?: number;
+  /** Live tunnel: keep stepping; skip convergence and max-step limits. */
+  continuous?: boolean;
 }
 
 export interface EulerTunnelResult {
@@ -24,6 +28,7 @@ export interface EulerTunnelResult {
   velocity: Float32Array;
   machField: Float32Array;
   pressure: Float32Array;
+  temperature: Float32Array;
 }
 
 type Conserved = [number, number, number, number];
@@ -47,8 +52,33 @@ export function fluidVelocityMaxDelta(
   return maxDelta / scale;
 }
 
-function defaultMaxSteps(nx: number, ny: number): number {
-  return Math.min(4000, Math.max(1000, Math.round((nx * ny) / 20)));
+/** Ideal-gas static temperature (K) from derived Euler output fields. */
+export function eulerTemperatureField(
+  velocity: Float32Array,
+  machField: Float32Array,
+  obstacle: Uint8Array,
+  altitude: number,
+): Float32Array {
+  const n = velocity.length;
+  const out = new Float32Array(n);
+  const tFreestream = temperatureAtAltitude(altitude);
+  const eps = 1e-6;
+
+  for (let i = 0; i < n; i++) {
+    if (obstacle[i]) {
+      out[i] = tFreestream;
+      continue;
+    }
+    const ma = machField[i];
+    const speed = velocity[i];
+    if (ma > eps && speed > eps) {
+      out[i] = (speed * speed) / (ma * ma * GAMMA * R_AIR);
+    } else {
+      out[i] = tFreestream;
+    }
+  }
+
+  return out;
 }
 
 function idx(x: number, y: number, ny: number): number {
@@ -115,70 +145,458 @@ function rusanovY(
   ];
 }
 
-/** 2D compressible Euler on the LBM tunnel grid (idx = x * ny + y). */
-export function runEulerTunnel(
-  config: EulerTunnelConfig,
-  onProgress: (p: number) => void,
-  cancelled: () => boolean,
-): EulerTunnelResult {
-  const { nx, ny, obstacle, mach, altitude } = config;
-  const temp = temperatureAtAltitude(altitude);
-  const rho0 = densityAtAltitude(altitude);
-  const a0 = speedOfSound(temp);
-  const u0 = mach * a0;
-  const p0 = rho0 * a0 * a0 / GAMMA;
+export function defaultEulerMaxSteps(nx: number, ny: number): number {
+  return Math.min(4000, Math.max(1000, Math.round((nx * ny) / 20)));
+}
 
-  const Lx = 3.0;
-  const Ly = Lx * (ny / nx);
-  const dx = Lx / nx;
-  const dy = Ly / ny;
-  const invDx = 1 / dx;
-  const invDy = 1 / dy;
-  const n = nx * ny;
+/** Physical tunnel length (m); flow enters at x = 0 and exits at x = length. */
+export const EULER_TUNNEL_LENGTH_M = 3;
 
-  let rhoA = new Float32Array(n);
-  let uA = new Float32Array(n);
-  let vA = new Float32Array(n);
-  let pA = new Float32Array(n);
-  let rhoB = new Float32Array(n);
-  let uB = new Float32Array(n);
-  let vB = new Float32Array(n);
-  let pB = new Float32Array(n);
-  const aScratch = new Float32Array(n);
-  const solid = new Uint8Array(n);
+export function eulerTunnelSizeM(nx: number, ny: number): { lengthM: number; heightM: number } {
+  const lengthM = EULER_TUNNEL_LENGTH_M;
+  return { lengthM, heightM: lengthM * (ny / nx) };
+}
 
-  for (let x = 0; x < nx; x++) {
-    for (let y = 0; y < ny; y++) {
-      const id = idx(x, y, ny);
-      solid[id] = obstacle[id];
-      if (solid[id]) {
-        rhoA[id] = rho0;
-        uA[id] = 0;
-        vA[id] = 0;
-        pA[id] = p0;
-        continue;
+/** Incremental 2D compressible Euler solver for live convergence stepping. */
+export class EulerTunnelSimulator {
+  readonly nx: number;
+  readonly ny: number;
+  mach: number;
+  altitude: number;
+  readonly maxSteps: number;
+  readonly velocity: Float32Array;
+  readonly machField: Float32Array;
+  readonly pressure: Float32Array;
+  readonly temperature: Float32Array;
+
+  stepIndex = 0;
+  converged = false;
+  simTimeS = 0;
+
+  private readonly n: number;
+  private rho0: number;
+  private u0: number;
+  private p0: number;
+  private tFreestream: number;
+  private readonly invDx: number;
+  private readonly invDy: number;
+  private readonly cellSize: number;
+  private readonly tolerance: number;
+  private readonly minSteps: number;
+  private readonly continuous: boolean;
+  private readonly checkInterval = 8;
+  private readonly stableChecksRequired = 3;
+  private readonly cfl = 0.35;
+  private readonly solid: Uint8Array;
+  private readonly aScratch: Float32Array;
+
+  private rhoA: Float32Array;
+  private uA: Float32Array;
+  private vA: Float32Array;
+  private pA: Float32Array;
+  private rhoB: Float32Array;
+  private uB: Float32Array;
+  private vB: Float32Array;
+  private pB: Float32Array;
+  private stableChecks = 0;
+
+  constructor(config: EulerTunnelConfig) {
+    const { nx, ny, obstacle, mach, altitude } = config;
+    this.nx = nx;
+    this.ny = ny;
+    this.mach = mach;
+    this.altitude = altitude;
+    this.n = nx * ny;
+
+    const temp = temperatureAtAltitude(altitude);
+    this.rho0 = densityAtAltitude(altitude);
+    const a0 = speedOfSound(temp);
+    this.u0 = mach * a0;
+    this.p0 = (this.rho0 * a0 * a0) / GAMMA;
+    this.tFreestream = temperatureAtAltitude(altitude);
+
+    const lx = EULER_TUNNEL_LENGTH_M;
+    const ly = lx * (ny / nx);
+    const dx = lx / nx;
+    const dy = ly / ny;
+    this.invDx = 1 / dx;
+    this.invDy = 1 / dy;
+    this.cellSize = Math.min(dx, dy);
+
+    this.continuous = config.continuous ?? false;
+    this.maxSteps = config.steps ?? defaultEulerMaxSteps(nx, ny);
+    this.tolerance = config.convergenceTolerance ?? 1e-4;
+    this.minSteps = Math.min(300, Math.max(100, Math.floor(this.maxSteps * 0.08)));
+
+    this.rhoA = new Float32Array(this.n);
+    this.uA = new Float32Array(this.n);
+    this.vA = new Float32Array(this.n);
+    this.pA = new Float32Array(this.n);
+    this.rhoB = new Float32Array(this.n);
+    this.uB = new Float32Array(this.n);
+    this.vB = new Float32Array(this.n);
+    this.pB = new Float32Array(this.n);
+    this.aScratch = new Float32Array(this.n);
+    this.solid = new Uint8Array(this.n);
+    this.velocity = new Float32Array(this.n);
+    this.machField = new Float32Array(this.n);
+    this.pressure = new Float32Array(this.n);
+    this.temperature = new Float32Array(this.n);
+
+    for (let x = 0; x < nx; x++) {
+      for (let y = 0; y < ny; y++) {
+        const id = idx(x, y, ny);
+        this.solid[id] = obstacle[id];
+        if (this.solid[id]) {
+          this.rhoA[id] = this.rho0;
+          this.uA[id] = 0;
+          this.vA[id] = 0;
+          this.pA[id] = this.p0;
+          continue;
+        }
+        this.rhoA[id] = this.rho0;
+        this.uA[id] = this.u0;
+        this.vA[id] = 0;
+        this.pA[id] = this.p0;
       }
-      rhoA[id] = rho0;
-      uA[id] = u0;
-      vA[id] = 0;
-      pA[id] = p0;
+    }
+
+    this.syncOutputFields();
+  }
+
+  get progress(): number {
+    if (this.continuous) return 0;
+    if (this.converged) return 1;
+    return Math.min(1, this.stepIndex / this.maxSteps);
+  }
+
+  step(): void {
+    if (!this.continuous && (this.converged || this.stepIndex >= this.maxSteps)) {
+      this.converged = true;
+      return;
+    }
+
+    const { nx, ny, n } = this;
+
+    for (let i = 0; i < n; i++) {
+      if (this.solid[i]) continue;
+      this.aScratch[i] = soundSpeed(this.rhoA[i], this.pA[i]);
+    }
+
+    let maxLambda = 1;
+    for (let x = 1; x < nx - 1; x++) {
+      const xBase = x * ny;
+      for (let y = 1; y < ny - 1; y++) {
+        const id = xBase + y;
+        if (this.solid[id]) continue;
+
+        const idL = id - ny;
+        const idR = id + ny;
+        const idB = id - 1;
+        const idT = id + 1;
+
+        const ux = this.uA[id];
+        const vy = this.vA[id];
+        const aC = this.aScratch[id];
+        let lambda = Math.max(Math.abs(ux) + aC, Math.abs(vy) + aC);
+
+        lambda = Math.max(lambda, Math.abs(this.uA[idL]) + this.aScratch[idL]);
+        lambda = Math.max(lambda, Math.abs(this.uA[idR]) + this.aScratch[idR]);
+        lambda = Math.max(lambda, Math.abs(this.vA[idB]) + this.aScratch[idB]);
+        lambda = Math.max(lambda, Math.abs(this.vA[idT]) + this.aScratch[idT]);
+
+        if (lambda > maxLambda) maxLambda = lambda;
+      }
+    }
+    const dt = (this.cfl * this.cellSize) / maxLambda;
+
+    for (let x = 1; x < nx - 1; x++) {
+      const xBase = x * ny;
+      for (let y = 1; y < ny - 1; y++) {
+        const id = xBase + y;
+        if (this.solid[id]) {
+          this.rhoB[id] = this.rho0;
+          this.uB[id] = 0;
+          this.vB[id] = 0;
+          this.pB[id] = this.p0;
+          continue;
+        }
+
+        const r = this.rhoA[id];
+        const ux = this.uA[id];
+        const vy = this.vA[id];
+        const pr = this.pA[id];
+        const E = pr / (GAMMA - 1) + 0.5 * r * (ux * ux + vy * vy);
+
+        const idL = id - ny;
+        const idR = id + ny;
+        const idB = id - 1;
+        const idT = id + 1;
+
+        const uL = this.uA[idL];
+        const uR = this.uA[idR];
+        const vB_n = this.vA[idB];
+        const vT = this.vA[idT];
+        const aC = this.aScratch[id];
+        const aL = this.aScratch[idL];
+        const aR = this.aScratch[idR];
+        const aB = this.aScratch[idB];
+        const aT = this.aScratch[idT];
+
+        const fxR = rusanovX(
+          r, ux, vy, pr,
+          this.rhoA[idR], uR, this.vA[idR], this.pA[idR],
+          Math.max(Math.abs(ux) + aC, Math.abs(uR) + aR),
+        );
+        const fxL = rusanovX(
+          this.rhoA[idL], uL, this.vA[idL], this.pA[idL],
+          r, ux, vy, pr,
+          Math.max(Math.abs(uL) + aL, Math.abs(ux) + aC),
+        );
+        const fyT = rusanovY(
+          r, ux, vy, pr,
+          this.rhoA[idT], this.uA[idT], vT, this.pA[idT],
+          Math.max(Math.abs(vy) + aC, Math.abs(vT) + aT),
+        );
+        const fyB = rusanovY(
+          this.rhoA[idB], this.uA[idB], vB_n, this.pA[idB],
+          r, ux, vy, pr,
+          Math.max(Math.abs(vB_n) + aB, Math.abs(vy) + aC),
+        );
+
+        const dRho = -(fxR[0] - fxL[0]) * this.invDx - (fyT[0] - fyB[0]) * this.invDy;
+        const dRhoU = -(fxR[1] - fxL[1]) * this.invDx - (fyT[1] - fyB[1]) * this.invDy;
+        const dRhoV = -(fxR[2] - fxL[2]) * this.invDx - (fyT[2] - fyB[2]) * this.invDy;
+        const dE = -(fxR[3] - fxL[3]) * this.invDx - (fyT[3] - fyB[3]) * this.invDy;
+
+        this.rhoB[id] = Math.max(1e-6, r + dt * dRho);
+        const rhoU = r * ux + dt * dRhoU;
+        const rhoV = r * vy + dt * dRhoV;
+        const EN = E + dt * dE;
+        const rhoNew = this.rhoB[id];
+        const uNew = rhoU / rhoNew;
+        const vNew = rhoV / rhoNew;
+        this.uB[id] = uNew;
+        this.vB[id] = vNew;
+        this.pB[id] = Math.max(
+          1e3,
+          (GAMMA - 1) * (EN - 0.5 * rhoNew * (uNew * uNew + vNew * vNew)),
+        );
+      }
+    }
+
+    this.applyBoundaryConditions(this.rhoB, this.uB, this.vB, this.pB);
+
+    const step = this.stepIndex;
+    if (
+      !this.continuous &&
+      step >= this.minSteps &&
+      step % this.checkInterval === 0
+    ) {
+      const delta = fluidVelocityMaxDelta(this.uA, this.vA, this.uB, this.vB, this.solid, this.u0);
+      if (delta < this.tolerance) {
+        this.stableChecks += 1;
+        if (this.stableChecks >= this.stableChecksRequired) {
+          [this.rhoA, this.rhoB] = [this.rhoB, this.rhoA];
+          [this.uA, this.uB] = [this.uB, this.uA];
+          [this.vA, this.vB] = [this.vB, this.vA];
+          [this.pA, this.pB] = [this.pB, this.pA];
+          this.stepIndex += 1;
+          this.simTimeS += dt;
+          this.converged = true;
+          this.syncOutputFields();
+          return;
+        }
+      } else {
+        this.stableChecks = 0;
+      }
+    }
+
+    [this.rhoA, this.rhoB] = [this.rhoB, this.rhoA];
+    [this.uA, this.uB] = [this.uB, this.uA];
+    [this.vA, this.vB] = [this.vB, this.vA];
+    [this.pA, this.pB] = [this.pB, this.pA];
+    this.stepIndex += 1;
+    this.simTimeS += dt;
+
+    if (!this.continuous && this.stepIndex >= this.maxSteps) {
+      this.converged = true;
+    }
+
+    this.syncOutputFields();
+  }
+
+  steps(count: number): number {
+    let ran = 0;
+    for (let i = 0; i < count && (this.continuous || !this.converged); i++) {
+      this.step();
+      ran += 1;
+    }
+    return ran;
+  }
+
+  /** Patch obstacle mask in-place and resume iterating toward a new steady state. */
+  updateObstacle(obstacle: Uint8Array): void {
+    if (obstacle.length !== this.n) return;
+
+    const wasSolid = new Uint8Array(this.solid);
+    const newlyFluid = new Uint8Array(this.n);
+
+    for (let id = 0; id < this.n; id++) {
+      const isSolid = obstacle[id] !== 0;
+      if (wasSolid[id] && !isSolid) newlyFluid[id] = 1;
+
+      if (!wasSolid[id] && isSolid) {
+        this.rhoA[id] = this.rho0;
+        this.uA[id] = 0;
+        this.vA[id] = 0;
+        this.pA[id] = this.p0;
+      }
+
+      this.solid[id] = isSolid ? 1 : 0;
+    }
+
+    this.fillNewlyFluidCells(newlyFluid);
+    this.resumeFromEdit();
+  }
+
+  /**
+   * Seed opened cells from nearby fluid instead of uniform freestream.
+   * Avoids a flat pressure/velocity block where an obstacle used to sit.
+   */
+  private fillNewlyFluidCells(newlyFluid: Uint8Array): void {
+    const filled = new Uint8Array(this.n);
+
+    for (let pass = 0; pass < this.nx + this.ny; pass++) {
+      let filledAny = false;
+      for (let id = 0; id < this.n; id++) {
+        if (!newlyFluid[id] || filled[id]) continue;
+        if (this.interpolateFluidFromNeighbors(id, newlyFluid, filled)) {
+          filled[id] = 1;
+          filledAny = true;
+        }
+      }
+      if (!filledAny) break;
+    }
+
+    for (let id = 0; id < this.n; id++) {
+      if (!newlyFluid[id] || filled[id]) continue;
+      this.rhoA[id] = this.rho0;
+      this.uA[id] = this.u0;
+      this.vA[id] = 0;
+      this.pA[id] = this.p0;
     }
   }
 
-  const maxSteps = config.steps ?? defaultMaxSteps(nx, ny);
-  const tolerance = config.convergenceTolerance ?? 1e-4;
-  const minSteps = Math.min(300, Math.max(100, Math.floor(maxSteps * 0.08)));
-  const checkInterval = 8;
-  const stableChecksRequired = 3;
-  const cfl = 0.35;
-  let stableChecks = 0;
+  private interpolateFluidFromNeighbors(
+    id: number,
+    newlyFluid: Uint8Array,
+    filled: Uint8Array,
+  ): boolean {
+    const { nx, ny } = this;
+    const x = Math.floor(id / ny);
+    const y = id % ny;
 
-  const applyBoundaryConditions = (
+    let count = 0;
+    let rho = 0;
+    let u = 0;
+    let v = 0;
+    let p = 0;
+
+    const neighbors: [number, number][] = [
+      [x - 1, y],
+      [x + 1, y],
+      [x, y - 1],
+      [x, y + 1],
+    ];
+
+    for (const [nx_, ny_] of neighbors) {
+      if (nx_ < 0 || nx_ >= nx || ny_ < 0 || ny_ >= ny) continue;
+      const nid = idx(nx_, ny_, ny);
+      if (this.solid[nid]) continue;
+      if (newlyFluid[nid] && !filled[nid]) continue;
+
+      rho += this.rhoA[nid];
+      u += this.uA[nid];
+      v += this.vA[nid];
+      p += this.pA[nid];
+      count += 1;
+    }
+
+    if (count === 0) return false;
+
+    const inv = 1 / count;
+    this.rhoA[id] = Math.max(1e-6, rho * inv);
+    this.uA[id] = u * inv;
+    this.vA[id] = v * inv;
+    this.pA[id] = Math.max(1e3, p * inv);
+    return true;
+  }
+
+  /** Update freestream Mach/altitude and inlet BC without cold-restarting the field. */
+  updateFlowParams(mach: number, altitude: number): void {
+    this.mach = mach;
+    this.altitude = altitude;
+
+    const temp = temperatureAtAltitude(altitude);
+    this.rho0 = densityAtAltitude(altitude);
+    const a0 = speedOfSound(temp);
+    this.u0 = mach * a0;
+    this.p0 = (this.rho0 * a0 * a0) / GAMMA;
+    this.tFreestream = temp;
+
+    for (let y = 0; y < this.ny; y++) {
+      const id = idx(0, y, this.ny);
+      if (this.solid[id]) continue;
+      this.rhoA[id] = this.rho0;
+      this.uA[id] = this.u0;
+      this.vA[id] = 0;
+      this.pA[id] = this.p0;
+    }
+
+    this.resumeFromEdit();
+  }
+
+  private resumeFromEdit(): void {
+    this.converged = false;
+    this.stableChecks = 0;
+    this.syncOutputFields();
+  }
+
+  computeObstacleDrag(obstacle: Uint8Array) {
+    const q0 = 0.5 * this.rho0 * this.u0 * this.u0;
+    return computeEulerTunnelDrag(
+      this.pressure,
+      obstacle,
+      this.nx,
+      this.ny,
+      this.p0,
+      q0,
+      this.mach,
+    );
+  }
+
+  buildResult(): EulerTunnelResult {
+    this.syncOutputFields();
+    return {
+      nx: this.nx,
+      ny: this.ny,
+      mach: this.mach,
+      altitude: this.altitude,
+      velocity: this.velocity,
+      machField: this.machField,
+      pressure: this.pressure,
+      temperature: this.temperature,
+    };
+  }
+
+  private applyBoundaryConditions(
     rho: ScalarField,
     u: ScalarField,
     v: ScalarField,
     p: ScalarField,
-  ) => {
+  ): void {
+    const { nx, ny, rho0, u0, p0 } = this;
     for (let y = 0; y < ny; y++) {
       const inGhost = idx(nx - 2, y, ny);
       const outId = idx(nx - 1, y, ny);
@@ -205,189 +623,52 @@ export function runEulerTunnel(
       v[top] = -v[topIn];
       p[top] = p[topIn];
     }
-  };
+  }
 
-  const cellSize = Math.min(dx, dy);
-
-  for (let step = 0; step < maxSteps; step++) {
-    if (cancelled()) throw new Error('cancelled');
-    if (step % 25 === 0) onProgress(step / maxSteps);
-
+  private syncOutputFields(): void {
+    const { n, solid, p0, tFreestream } = this;
     for (let i = 0; i < n; i++) {
-      if (solid[i]) continue;
-      aScratch[i] = soundSpeed(rhoA[i], pA[i]);
-    }
-
-    let maxLambda = 1;
-    for (let x = 1; x < nx - 1; x++) {
-      const xBase = x * ny;
-      for (let y = 1; y < ny - 1; y++) {
-        const id = xBase + y;
-        if (solid[id]) continue;
-
-        const idL = id - ny;
-        const idR = id + ny;
-        const idB = id - 1;
-        const idT = id + 1;
-
-        const ux = uA[id];
-        const vy = vA[id];
-        const aC = aScratch[id];
-        let lambda = Math.max(Math.abs(ux) + aC, Math.abs(vy) + aC);
-
-        const uL = uA[idL];
-        const aL = aScratch[idL];
-        lambda = Math.max(lambda, Math.abs(uL) + aL);
-
-        const uR = uA[idR];
-        const aR = aScratch[idR];
-        lambda = Math.max(lambda, Math.abs(uR) + aR);
-
-        const vB_n = vA[idB];
-        const aB = aScratch[idB];
-        lambda = Math.max(lambda, Math.abs(vB_n) + aB);
-
-        const vT = vA[idT];
-        const aT = aScratch[idT];
-        lambda = Math.max(lambda, Math.abs(vT) + aT);
-
-        if (lambda > maxLambda) maxLambda = lambda;
+      if (solid[i]) {
+        this.velocity[i] = 0;
+        this.machField[i] = 0;
+        this.pressure[i] = p0;
+        this.temperature[i] = tFreestream;
+        continue;
       }
+      const speed = Math.sqrt(this.uA[i] * this.uA[i] + this.vA[i] * this.vA[i]);
+      const a = soundSpeed(this.rhoA[i], this.pA[i]);
+      this.velocity[i] = speed;
+      this.machField[i] = speed / Math.max(a, 1e-6);
+      this.pressure[i] = this.pA[i];
+      this.temperature[i] = this.pA[i] / (Math.max(this.rhoA[i], 1e-6) * R_AIR);
     }
-    const dt = (cfl * cellSize) / maxLambda;
+  }
+}
 
-    for (let x = 1; x < nx - 1; x++) {
-      const xBase = x * ny;
-      for (let y = 1; y < ny - 1; y++) {
-        const id = xBase + y;
-        if (solid[id]) {
-          rhoB[id] = rho0;
-          uB[id] = 0;
-          vB[id] = 0;
-          pB[id] = p0;
-          continue;
-        }
+/** 2D compressible Euler on the LBM tunnel grid (idx = x * ny + y). */
+export function runEulerTunnel(
+  config: EulerTunnelConfig,
+  onProgress: (p: number) => void,
+  cancelled: () => boolean,
+): EulerTunnelResult {
+  const sim = new EulerTunnelSimulator(config);
 
-        const r = rhoA[id];
-        const ux = uA[id];
-        const vy = vA[id];
-        const pr = pA[id];
-        const E = pr / (GAMMA - 1) + 0.5 * r * (ux * ux + vy * vy);
-
-        const idL = id - ny;
-        const idR = id + ny;
-        const idB = id - 1;
-        const idT = id + 1;
-
-        const uL = uA[idL];
-        const uR = uA[idR];
-        const vB_n = vA[idB];
-        const vT = vA[idT];
-        const aC = aScratch[id];
-        const aL = aScratch[idL];
-        const aR = aScratch[idR];
-        const aB = aScratch[idB];
-        const aT = aScratch[idT];
-
-        const fxR = rusanovX(
-          r, ux, vy, pr,
-          rhoA[idR], uR, vA[idR], pA[idR],
-          Math.max(Math.abs(ux) + aC, Math.abs(uR) + aR),
-        );
-        const fxL = rusanovX(
-          rhoA[idL], uL, vA[idL], pA[idL],
-          r, ux, vy, pr,
-          Math.max(Math.abs(uL) + aL, Math.abs(ux) + aC),
-        );
-        const fyT = rusanovY(
-          r, ux, vy, pr,
-          rhoA[idT], uA[idT], vT, pA[idT],
-          Math.max(Math.abs(vy) + aC, Math.abs(vT) + aT),
-        );
-        const fyB = rusanovY(
-          rhoA[idB], uA[idB], vB_n, pA[idB],
-          r, ux, vy, pr,
-          Math.max(Math.abs(vB_n) + aB, Math.abs(vy) + aC),
-        );
-
-        const dRho = -(fxR[0] - fxL[0]) * invDx - (fyT[0] - fyB[0]) * invDy;
-        const dRhoU = -(fxR[1] - fxL[1]) * invDx - (fyT[1] - fyB[1]) * invDy;
-        const dRhoV = -(fxR[2] - fxL[2]) * invDx - (fyT[2] - fyB[2]) * invDy;
-        const dE = -(fxR[3] - fxL[3]) * invDx - (fyT[3] - fyB[3]) * invDy;
-
-        rhoB[id] = Math.max(1e-6, r + dt * dRho);
-        const rhoU = r * ux + dt * dRhoU;
-        const rhoV = r * vy + dt * dRhoV;
-        const EN = E + dt * dE;
-        const rhoNew = rhoB[id];
-        const uNew = rhoU / rhoNew;
-        const vNew = rhoV / rhoNew;
-        uB[id] = uNew;
-        vB[id] = vNew;
-        pB[id] = Math.max(1e3, (GAMMA - 1) * (EN - 0.5 * rhoNew * (uNew * uNew + vNew * vNew)));
-      }
-    }
-
-    applyBoundaryConditions(rhoB, uB, vB, pB);
-
-    if (step >= minSteps && step % checkInterval === 0) {
-      const delta = fluidVelocityMaxDelta(uA, vA, uB, vB, solid, u0);
-      if (delta < tolerance) {
-        stableChecks += 1;
-        if (stableChecks >= stableChecksRequired) {
-          [rhoA, rhoB] = [rhoB, rhoA];
-          [uA, uB] = [uB, uA];
-          [vA, vB] = [vB, vA];
-          [pA, pB] = [pB, pA];
-          break;
-        }
-      } else {
-        stableChecks = 0;
-      }
-    }
-
-    [rhoA, rhoB] = [rhoB, rhoA];
-    [uA, uB] = [uB, uA];
-    [vA, vB] = [vB, vA];
-    [pA, pB] = [pB, pA];
+  while (!sim.converged && sim.stepIndex < sim.maxSteps) {
+    if (cancelled()) throw new Error('cancelled');
+    sim.step();
+    if (sim.stepIndex % 25 === 0) onProgress(sim.progress);
   }
 
   onProgress(1);
-
-  const velocity = new Float32Array(n);
-  const machField = new Float32Array(n);
-  const pressure = new Float32Array(n);
-
-  for (let i = 0; i < n; i++) {
-    if (solid[i]) {
-      velocity[i] = 0;
-      machField[i] = 0;
-      pressure[i] = p0;
-      continue;
-    }
-    const speed = Math.sqrt(uA[i] * uA[i] + vA[i] * vA[i]);
-    const a = soundSpeed(rhoA[i], pA[i]);
-    velocity[i] = speed;
-    machField[i] = speed / Math.max(a, 1e-6);
-    pressure[i] = pA[i];
-  }
-
-  return {
-    nx,
-    ny,
-    mach,
-    altitude,
-    velocity,
-    machField,
-    pressure,
-  };
+  return sim.buildResult();
 }
 
 export function getEulerTunnelMetric(
   result: EulerTunnelResult,
-  displayMode: 'velocity' | 'pressure' | 'mach',
+  displayMode: LbmDisplayMode,
 ): Float32Array {
   if (displayMode === 'velocity') return result.velocity;
   if (displayMode === 'mach') return result.machField;
+  if (displayMode === 'temperature') return result.temperature;
   return result.pressure;
 }

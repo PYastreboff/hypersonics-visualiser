@@ -567,16 +567,17 @@ export function LbmControlPanel() {
           <span className="value">{lbmTunnelNy} cells</span>
         </SettingLabel>
 
-        <SettingLabel
-          label="Physical dimensions"
-          tip="Show length and height labels (metres) on the tunnel viewport"
+        <label
+          className="checkbox"
+          title="Show length and height labels (metres) on the tunnel viewport"
         >
           <input
             type="checkbox"
             checked={lbmShowTunnelDims}
             onChange={toggleLbmShowTunnelDims}
           />
-        </SettingLabel>
+          Physical dimensions
+        </label>
 
         <SettingLabel
           label="Simulation quality"

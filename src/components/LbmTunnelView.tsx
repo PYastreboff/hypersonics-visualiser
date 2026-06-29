@@ -663,6 +663,11 @@ export function LbmTunnelView() {
     if (lbmPhysicsMode === 'euler') {
       const { eulerRunMode } = useSimStore.getState();
       if (eulerRunMode === 'live') {
+        // Keep interaction responsive even while the live worker is busy:
+        // redraw immediately with the latest available metric + updated obstacle.
+        if (metricRef.current) {
+          paintMetric(metricRef.current);
+        }
         displayModeDirtyRef.current = true;
         postDisplayModeToLiveWorker();
         return;
@@ -693,6 +698,11 @@ export function LbmTunnelView() {
 
     const worker = liveWorkerRef.current;
     if (worker && lbmRunMode === 'live') {
+      // Keep interaction responsive even while the live worker is busy:
+      // redraw immediately with the latest available metric + updated obstacle.
+      if (metricRef.current) {
+        paintMetric(metricRef.current);
+      }
       displayModeDirtyRef.current = true;
       postDisplayModeToLiveWorker();
       return;

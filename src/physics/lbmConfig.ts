@@ -139,6 +139,7 @@ export function formatLbmLegendValue(
   value: number,
   physicsMode: 'lbm' | 'euler' = 'lbm',
 ): string {
+  if (!Number.isFinite(value)) return '—';
   if (displayMode === 'velocity') {
     return formatLbmSpeedMs(value, 3);
   }

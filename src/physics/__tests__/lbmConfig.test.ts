@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatEulerElapsedMs,
+  formatLbmLegendValue,
   formatLiveSimTime,
   formatPhysicalSimTime,
   isLiveSimRealTime,
@@ -58,6 +59,11 @@ describe('lbm timing (gem.py)', () => {
     expect(formatLiveSimTime(500, false)).toBe('500 ms');
     expect(formatLiveSimTime(500, true)).toBe('500 ms · real time');
     expect(formatLiveSimTime(1500, true)).toBe('1.5 s · real time');
+  });
+
+  it('formats invalid legend metric values safely', () => {
+    expect(formatLbmLegendValue('pressure', Number.NaN, 'euler')).toBe('—');
+    expect(formatLbmLegendValue('mach', Number.POSITIVE_INFINITY, 'euler')).toBe('—');
   });
 });
 

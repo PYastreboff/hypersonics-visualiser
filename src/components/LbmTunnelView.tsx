@@ -584,6 +584,8 @@ export function LbmTunnelView() {
     const grid = hoverGridRef.current;
     const metric = metricRef.current;
     const obstacle = obstacleRef.current;
+    const { lbmDisplayMode, lbmPhysicsMode } = useSimStore.getState();
+    const label = lbmDisplayModeLabel(lbmDisplayMode);
     if (!grid || !metric || !obstacle) {
       if (hoverReadoutCacheRef.current !== null) {
         hoverReadoutCacheRef.current = null;
@@ -593,11 +595,28 @@ export function LbmTunnelView() {
     }
 
     const idx = grid.gx * ny + grid.gy;
-    const { lbmDisplayMode, lbmPhysicsMode } = useSimStore.getState();
-    const label = lbmDisplayModeLabel(lbmDisplayMode);
+    if (idx < 0 || idx >= metric.length) {
+      const unavailable = `${label}: Updating…`;
+      if (unavailable !== hoverReadoutCacheRef.current) {
+        hoverReadoutCacheRef.current = unavailable;
+        setHoverReadout(unavailable);
+      }
+      return;
+    }
+
+    const value = metric[idx];
+    if (!Number.isFinite(value)) {
+      const invalid = obstacle[idx] ? `${label}: Obstacle` : `${label}: Updating…`;
+      if (invalid !== hoverReadoutCacheRef.current) {
+        hoverReadoutCacheRef.current = invalid;
+        setHoverReadout(invalid);
+      }
+      return;
+    }
+
     const next = obstacle[idx]
       ? `${label}: Obstacle`
-      : `${label}: ${formatLbmLegendValue(lbmDisplayMode, metric[idx], lbmPhysicsMode)} · (${grid.gx}, ${grid.gy})`;
+      : `${label}: ${formatLbmLegendValue(lbmDisplayMode, value, lbmPhysicsMode)} · (${grid.gx}, ${grid.gy})`;
 
     if (next === hoverReadoutCacheRef.current) return;
     hoverReadoutCacheRef.current = next;

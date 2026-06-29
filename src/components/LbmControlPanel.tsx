@@ -439,6 +439,14 @@ export function LbmControlPanel() {
                 onPointerUp={flushEulerFlowCommit}
                 onKeyUp={flushEulerFlowCommit}
               />
+              <NumInput
+                value={lbmEulerMach}
+                onChange={onEulerMachChange}
+                onCommit={flushEulerFlowCommit}
+                min={EULER_MIN_MACH}
+                max={EULER_MAX_MACH}
+                step={0.01}
+              />
               <span className="value">
                 Ma {lbmEulerMach.toFixed(2)} ({regimeLabel(detectRegime(lbmEulerMach))}) ·{' '}
                 {formatLbmSpeedMs(eulerU0)}

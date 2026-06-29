@@ -598,6 +598,8 @@ export function LbmControlPanel() {
             {LBM_RESOLUTION_SCALES.map((scale) => (
               <option key={scale} value={scale}>
                 {lbmResolutionLabel(scale, lbmTunnelNx, lbmTunnelNy)}
+                {scale === 4 ? '  [Warning: slow]' : ''}
+                {scale === 6 ? '  [Warning: very slow]' : ''}
               </option>
             ))}
           </select>

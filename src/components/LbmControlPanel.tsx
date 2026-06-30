@@ -69,6 +69,7 @@ function ShapeCard({
   index,
   selected,
   hovered,
+  isEuler,
   onChange,
   onMove,
   onMoveCommit,
@@ -80,6 +81,7 @@ function ShapeCard({
   index: number;
   selected: boolean;
   hovered: boolean;
+  isEuler: boolean;
   onChange: (shape: LbmShapeInput) => void;
   onMove: (id: string, cx: number, cy: number) => void;
   onMoveCommit: () => void;
@@ -173,25 +175,27 @@ function ShapeCard({
         />
       </div>
 
-      <div className="setting-label lbm-slip-setting">
-        <span className="label-row">
-          <label className="checkbox lbm-slip-checkbox-row">
-            <input
-              type="checkbox"
-              checked={!!shape.slipWall}
-              onChange={(e) => onChange({ ...shape, slipWall: e.target.checked })}
-            />
-            <span>Slip wall (Euler)</span>
-          </label>
-          <span
-            className="tip-trigger"
-            data-tip="Euler only: treat this obstacle as an inviscid slip wall (normal velocity reflected, tangential preserved)."
-            aria-label="Slip wall (Euler) – Euler only: treat this obstacle as an inviscid slip wall (normal velocity reflected, tangential preserved)."
-          >
-            ?
+      {isEuler && (
+        <div className="setting-label lbm-slip-setting">
+          <span className="label-row">
+            <label className="checkbox lbm-slip-checkbox-row">
+              <input
+                type="checkbox"
+                checked={!!shape.slipWall}
+                onChange={(e) => onChange({ ...shape, slipWall: e.target.checked })}
+              />
+              <span>Slip wall</span>
+            </label>
+            <span
+              className="tip-trigger"
+              data-tip="Treat this obstacle as an inviscid slip wall (normal velocity reflected, tangential preserved)."
+              aria-label="Slip wall – Treat this obstacle as an inviscid slip wall (normal velocity reflected, tangential preserved)."
+            >
+              ?
+            </span>
           </span>
-        </span>
-      </div>
+        </div>
+      )}
 
       {shape.type === 'airfoil' && (
         <div className="lbm-field-grid">
@@ -500,7 +504,7 @@ export function LbmControlPanel() {
             value={lbmDisplayMode}
             onChange={(e) => setLbmDisplayMode(e.target.value as LbmDisplayMode)}
           >
-            <option value="velocity">Velocity magnitude</option>
+            {!isEuler && <option value="velocity">Velocity magnitude</option>}
             {isEuler && <option value="mach">Mach</option>}
             <option value="pressure">Pressure</option>
             {isEuler && <option value="temperature">Temperature</option>}
@@ -852,6 +856,7 @@ export function LbmControlPanel() {
             index={index}
             selected={shape.id === selectedLbmShapeId}
             hovered={shape.id === hoveredLbmShapeId}
+            isEuler={isEuler}
             onChange={(next) => updateLbmShape(shape.id, next)}
             onMove={(id, cx, cy) => updateLbmShapePosition(id, cx, cy)}
             onMoveCommit={commitLbmShapeLayout}

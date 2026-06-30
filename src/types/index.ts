@@ -28,10 +28,20 @@ export type LbmRunMode = 'live' | 'prerender';
 export type LbmPrerenderStatus = 'idle' | 'running' | 'ready' | 'error' | 'cancelled';
 
 export type EulerRunMode = 'live' | 'steady';
+export type EulerSolverScheme =
+  | 'rusanov'
+  | 'hll'
+  | 'hllc'
+  | 'roe'
+  | 'ausmplus'
+  | 'kt';
+
+export type EulerSpatialOrder = 'first' | 'muscl';
+export type EulerWallMode = 'reflective' | 'open';
 
 export type EulerTunnelStatus = 'idle' | 'running' | 'ready' | 'error' | 'cancelled';
 
-export type LbmShapeType = 'airfoil' | 'square' | 'circle' | 'doubleWedge' | 'custom';
+export type LbmShapeType = 'airfoil' | 'square' | 'circle' | 'doubleWedge' | 'flatPlate' | 'custom';
 
 export type LbmInteractionMode = 'select' | 'draw';
 

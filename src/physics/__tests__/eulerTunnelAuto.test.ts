@@ -44,4 +44,17 @@ describe('runEulerTunnelAuto', () => {
     expect(samples[0]).toBeLessThanOrEqual(samples[samples.length - 1]!);
     expect(samples[samples.length - 1]).toBe(1);
   });
+
+  it('uses CPU backend for non-default Euler options', async () => {
+    const cases = [
+      { scheme: 'hllc' as const },
+      { scheme: 'roe' as const },
+      { spatialOrder: 'muscl' as const },
+    ];
+    for (const extra of cases) {
+      const { backend, result } = await runEulerTunnelAuto({ ...smallConfig, ...extra });
+      expect(backend).toBe('cpu');
+      expect(result.machField[1 * smallConfig.ny + 15]).toBeGreaterThan(0.05);
+    }
+  });
 });

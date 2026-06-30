@@ -1,7 +1,7 @@
-import type { LbmShapeInput } from '@/types';
+import type { LbmShapeInput, LbmShapeType } from '@/types';
 
 export interface LbmShapeSpec {
-  type: 'square' | 'circle' | 'airfoil' | 'doubleWedge' | 'custom';
+  type: 'square' | 'circle' | 'airfoil' | 'doubleWedge' | 'flatPlate' | 'custom';
   cx: number;
   cy: number;
   aoa: number;
@@ -13,6 +13,52 @@ export interface LbmShapeSpec {
   customScale?: number;
   stencilX?: number[];
   stencilY?: number[];
+}
+
+export function defaultLbmShapeGeometry(
+  type: LbmShapeType,
+): Partial<Pick<LbmShapeInput, 'width' | 'height' | 'radius' | 'chord' | 'naca'>> {
+  switch (type) {
+    case 'airfoil':
+      return { chord: 80, naca: '0012' };
+    case 'flatPlate':
+      return { width: 80, height: 1 };
+    case 'square':
+      return { width: 20, height: 20 };
+    case 'doubleWedge':
+      return { width: 60, height: 24 };
+    case 'circle':
+      return { radius: 12 };
+    default:
+      return {};
+  }
+}
+
+/** Replace geometry when switching shape type (avoids reusing block size on flat plate). */
+export function shapeInputForType(shape: LbmShapeInput, type: LbmShapeType): LbmShapeInput {
+  if (type === 'custom') return shape;
+
+  const base = {
+    id: shape.id,
+    cx: shape.cx,
+    cy: shape.cy,
+    aoa: type === 'flatPlate' ? 0 : shape.aoa,
+    type,
+  };
+  const geom = defaultLbmShapeGeometry(type);
+
+  switch (type) {
+    case 'airfoil':
+      return { ...base, chord: geom.chord ?? 80, naca: geom.naca ?? '0012' };
+    case 'flatPlate':
+    case 'square':
+    case 'doubleWedge':
+      return { ...base, width: geom.width!, height: geom.height! };
+    case 'circle':
+      return { ...base, radius: geom.radius ?? 12 };
+    default:
+      return { ...base, ...geom };
+  }
 }
 
 export function lbmInputToSpec(shape: LbmShapeInput): LbmShapeSpec {
@@ -44,7 +90,12 @@ export function scaleShapeSpecs(
       cx: shape.cx * resolutionScale,
       cy: shape.cy * resolutionScale,
       width: shape.width !== undefined ? shape.width * resolutionScale : undefined,
-      height: shape.height !== undefined ? shape.height * resolutionScale : undefined,
+      height:
+        shape.height === undefined
+          ? undefined
+          : shape.type === 'flatPlate'
+            ? Math.max(1, Math.round(shape.height))
+            : shape.height * resolutionScale,
       radius: shape.radius !== undefined ? shape.radius * resolutionScale : undefined,
       chord: shape.chord !== undefined ? shape.chord * resolutionScale : undefined,
       stencilX:
@@ -53,6 +104,18 @@ export function scaleShapeSpecs(
         shape.stencilY?.map((v) => Math.round(v * sizeScale)) ?? shape.stencilY,
     };
   });
+}
+
+/** Thin body aligned with local x (streamwise at aoa = 0°). */
+export function pointInFlatPlate(
+  xRot: number,
+  yRot: number,
+  length: number,
+  thickness: number,
+): boolean {
+  const halfLen = Math.max(1, length) / 2;
+  const halfThick = Math.max(1, thickness) / 2;
+  return Math.abs(xRot) <= halfLen && Math.abs(yRot) < halfThick;
 }
 
 /** Diamond profile: square rotated 45° with independent horizontal/vertical scale. */
@@ -79,7 +142,8 @@ export function buildObstacleMask(
     const cx = shape.cx;
     const cy = shape.cy;
     const aoa = shape.aoa ?? 0;
-    const rad = (-aoa * Math.PI) / 180;
+    const invertAoa = shape.type === 'square' || shape.type === 'flatPlate';
+    const rad = ((invertAoa ? aoa : -aoa) * Math.PI) / 180;
     const cosA = Math.cos(rad);
     const sinA = Math.sin(rad);
 
@@ -118,6 +182,17 @@ export function buildObstacleMask(
               yRot,
               shape.width ?? 60,
               shape.height ?? 24,
+            )
+          ) {
+            obstacle[x * ny + y] = 1;
+          }
+        } else if (shape.type === 'flatPlate') {
+          if (
+            pointInFlatPlate(
+              xRot,
+              yRot,
+              shape.width ?? 80,
+              shape.height ?? 1,
             )
           ) {
             obstacle[x * ny + y] = 1;

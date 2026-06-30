@@ -48,6 +48,43 @@ describe('runEulerTunnel', () => {
     expect(result.velocity[20 * ny + 10]).toBe(0);
   });
 
+  it('supports alternate flux schemes', () => {
+    const nx = 60;
+    const ny = 30;
+    const obstacle = new Uint8Array(nx * ny);
+    const schemes = ['hll', 'hllc', 'roe', 'ausmplus', 'kt'] as const;
+    for (const scheme of schemes) {
+      const result = runEulerTunnel(
+        { nx, ny, obstacle, mach: 0.2, altitude: 0, steps: 120, scheme },
+        () => {},
+        () => false,
+      );
+      expect(result.velocity[1 * ny + 15]).toBeGreaterThan(50);
+      expect(result.machField[1 * ny + 15]).toBeGreaterThan(0.05);
+    }
+  });
+
+  it('supports muscl spatial reconstruction', () => {
+    const nx = 60;
+    const ny = 30;
+    const obstacle = new Uint8Array(nx * ny);
+    const result = runEulerTunnel(
+      {
+        nx,
+        ny,
+        obstacle,
+        mach: 0.2,
+        altitude: 0,
+        steps: 120,
+        scheme: 'hllc',
+        spatialOrder: 'muscl',
+      },
+      () => {},
+      () => false,
+    );
+    expect(result.velocity[1 * ny + 15]).toBeGreaterThan(50);
+  });
+
   it('stops early once the field settles instead of always using max steps', () => {
     const nx = 60;
     const ny = 30;

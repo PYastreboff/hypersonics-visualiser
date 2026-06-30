@@ -6,7 +6,7 @@ import {
   renderTunnelBitmap,
   shouldTransferLiveMetric,
 } from '@/visualization/tunnelRenderer';
-import type { LbmDisplayMode } from '@/types';
+import type { LbmDisplayMode, EulerSolverScheme, EulerSpatialOrder, EulerWallMode } from '@/types';
 
 let generation = 0;
 let sim: EulerTunnelSimulator | null = null;
@@ -19,12 +19,20 @@ let windSpeed = 0;
 let fluidDensity = 1;
 let eulerMach = 0.3;
 let eulerAltitude = 0;
+let eulerScheme: EulerSolverScheme = 'rusanov';
+let eulerSpatialOrder: EulerSpatialOrder = 'first';
+let eulerWallMode: EulerWallMode = 'reflective';
+let dragTick = 0;
+let lastTunnelCd: number | null = null;
 
 async function postFrame() {
   if (!sim || !obstacle) return;
 
   const result = sim.buildResult();
-  const drag = sim.computeObstacleDrag(obstacle);
+  if (dragTick++ % 4 === 0) {
+    lastTunnelCd = sim.computeObstacleDrag(obstacle)?.cd ?? null;
+  }
+  const dragCd = lastTunnelCd;
   const metric = getEulerTunnelMetric(result, displayMode);
   const { bitmap, vmin, vmax } = await renderTunnelBitmap({
     metric,
@@ -46,7 +54,7 @@ async function postFrame() {
     converged: sim.converged,
     progress: sim.progress,
     simTimeS: sim.simTimeS,
-    tunnelCd: drag?.cd ?? null,
+    tunnelCd: dragCd,
     vmin,
     vmax,
     bitmap,
@@ -83,6 +91,9 @@ self.onmessage = async (e: MessageEvent) => {
     fluidDensity = msg.fluidDensity ?? 1;
     eulerMach = msg.mach;
     eulerAltitude = msg.altitude;
+    eulerScheme = msg.scheme ?? 'rusanov';
+    eulerSpatialOrder = msg.spatialOrder ?? 'first';
+    eulerWallMode = msg.wallMode ?? 'reflective';
     obstacle = new Uint8Array(msg.obstacle);
     sim = new EulerTunnelSimulator({
       nx,
@@ -90,6 +101,9 @@ self.onmessage = async (e: MessageEvent) => {
       obstacle,
       mach: eulerMach,
       altitude: eulerAltitude,
+      scheme: eulerScheme,
+      spatialOrder: eulerSpatialOrder,
+      wallMode: eulerWallMode,
       continuous: true,
     });
     await postFrame();

@@ -3,6 +3,7 @@ import {
   buildObstacleMask,
   lbmInputToSpec,
   pointInDoubleWedge,
+  pointInFlatPlate,
   scaleShapeSpecs,
   type LbmShapeSpec,
 } from './lbmObstacles';
@@ -11,7 +12,8 @@ function pointInSpec(gx: number, gy: number, spec: LbmShapeSpec): boolean {
   const cx = spec.cx;
   const cy = spec.cy;
   const aoa = spec.aoa ?? 0;
-  const rad = (-aoa * Math.PI) / 180;
+  const invertAoa = spec.type === 'square' || spec.type === 'flatPlate';
+  const rad = ((invertAoa ? aoa : -aoa) * Math.PI) / 180;
   const cosA = Math.cos(rad);
   const sinA = Math.sin(rad);
   const xLocal = gx - cx;
@@ -36,6 +38,15 @@ function pointInSpec(gx: number, gy: number, spec: LbmShapeSpec): boolean {
       yRot,
       spec.width ?? 60,
       spec.height ?? 24,
+    );
+  }
+
+  if (spec.type === 'flatPlate') {
+    return pointInFlatPlate(
+      xRot,
+      yRot,
+      spec.width ?? 80,
+      spec.height ?? 1,
     );
   }
 

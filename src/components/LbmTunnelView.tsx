@@ -800,12 +800,7 @@ export function LbmTunnelView() {
   }, [lbmPlaying]);
 
   const rebuildObstacleVisual = useCallback(() => {
-    const shapes = useSimStore.getState().lbmShapes;
-    const specs = scaleShapeSpecs(
-      shapes.map(lbmInputToSpec),
-      lbmResolutionScale,
-    );
-    const newMask = buildObstacleMask(nx, ny, specs);
+    const newMask = buildObstacle();
     let obstacle = obstacleRef.current;
     if (!obstacle || obstacle.length !== newMask.length) {
       obstacle = new Uint8Array(newMask);
@@ -830,7 +825,7 @@ export function LbmTunnelView() {
     paintImmediatePreviewRef.current();
 
     return obstacle;
-  }, [nx, ny, lbmResolutionScale, postObstacleToLiveWorker]);
+  }, [buildObstacle, postObstacleToLiveWorker]);
 
   const attachLiveWorker = useCallback(
     (kind: 'lbm' | 'euler', worker: Worker, generation: number) => {
@@ -909,7 +904,13 @@ export function LbmTunnelView() {
     const obstacle = buildObstacle();
     obstacleRef.current = obstacle;
     const obstacleCopy = new Uint8Array(obstacle);
-    const { lbmEulerMach, lbmEulerAltitude } = useSimStore.getState();
+    const {
+      lbmEulerMach,
+      lbmEulerAltitude,
+      eulerSolverScheme,
+      eulerSpatialOrder,
+      eulerWallMode,
+    } = useSimStore.getState();
 
     setEulerTunnelState({ status: 'running', progress: 0, cd: null });
     reportTunnelCd(null);
@@ -990,6 +991,9 @@ export function LbmTunnelView() {
         ny,
         mach: lbmEulerMach,
         altitude: lbmEulerAltitude,
+        scheme: eulerSolverScheme,
+        spatialOrder: eulerSpatialOrder,
+        wallMode: eulerWallMode,
         obstacle: obstacleCopy.buffer,
       },
       [obstacleCopy.buffer],
@@ -1020,6 +1024,9 @@ export function LbmTunnelView() {
         ny,
         mach: state.lbmEulerMach,
         altitude: state.lbmEulerAltitude,
+        scheme: state.eulerSolverScheme,
+        spatialOrder: state.eulerSpatialOrder,
+        wallMode: state.eulerWallMode,
         displayMode: state.lbmDisplayMode,
         windSpeed: state.lbmWindSpeed,
         fluidDensity: state.lbmFluidDensity,

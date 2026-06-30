@@ -4,8 +4,15 @@ import {
   speedOfSound,
   temperatureAtAltitude,
 } from '@/physics/atmosphere';
-import type { LbmDisplayMode } from '@/types';
+import type { LbmDisplayMode, EulerSolverScheme, EulerSpatialOrder, EulerWallMode } from '@/types';
 import { computeEulerTunnelDrag } from '@/physics/tunnelDrag';
+import {
+  EULER_CFL,
+  eulerSoundSpeed,
+  interfaceFluxX,
+  interfaceFluxY,
+} from '@/physics/eulerFlux';
+import { facePrimitivesX, facePrimitivesY } from '@/physics/eulerReconstruction';
 
 export interface EulerTunnelConfig {
   nx: number;
@@ -18,6 +25,12 @@ export interface EulerTunnelConfig {
   convergenceTolerance?: number;
   /** Live tunnel: keep stepping; skip convergence and max-step limits. */
   continuous?: boolean;
+  /** Numerical interface flux scheme. */
+  scheme?: EulerSolverScheme;
+  /** Spatial reconstruction order (MUSCL is CPU-only). */
+  spatialOrder?: EulerSpatialOrder;
+  /** Tunnel top/bottom boundary mode. */
+  wallMode?: EulerWallMode;
 }
 
 export interface EulerTunnelResult {
@@ -31,7 +44,7 @@ export interface EulerTunnelResult {
   temperature: Float32Array;
 }
 
-type Conserved = [number, number, number, number];
+
 type ScalarField = Float32Array;
 
 /** Max relative change in velocity (L∞) between two states, fluid cells only. */
@@ -85,66 +98,6 @@ function idx(x: number, y: number, ny: number): number {
   return x * ny + y;
 }
 
-function soundSpeed(rho: number, p: number): number {
-  return Math.sqrt(GAMMA * p / Math.max(rho, 1e-6));
-}
-
-function fluxX(r: number, ux: number, vy: number, pr: number): Conserved {
-  const E = pr / (GAMMA - 1) + 0.5 * r * (ux * ux + vy * vy);
-  return [r * ux, r * ux * ux + pr, r * ux * vy, (E + pr) * ux];
-}
-
-function fluxY(r: number, ux: number, vy: number, pr: number): Conserved {
-  const E = pr / (GAMMA - 1) + 0.5 * r * (ux * ux + vy * vy);
-  return [r * vy, r * ux * vy, r * vy * vy + pr, (E + pr) * vy];
-}
-
-function rusanovX(
-  rL: number,
-  uL: number,
-  vL: number,
-  pL: number,
-  rR: number,
-  uR: number,
-  vR: number,
-  pR: number,
-  waveSpeed: number,
-): Conserved {
-  const fL = fluxX(rL, uL, vL, pL);
-  const fR = fluxX(rR, uR, vR, pR);
-  const uL_c: Conserved = [rL, rL * uL, rL * vL, pL / (GAMMA - 1) + 0.5 * rL * (uL * uL + vL * vL)];
-  const uR_c: Conserved = [rR, rR * uR, rR * vR, pR / (GAMMA - 1) + 0.5 * rR * (uR * uR + vR * vR)];
-  return [
-    0.5 * (fL[0] + fR[0]) - 0.5 * waveSpeed * (uR_c[0] - uL_c[0]),
-    0.5 * (fL[1] + fR[1]) - 0.5 * waveSpeed * (uR_c[1] - uL_c[1]),
-    0.5 * (fL[2] + fR[2]) - 0.5 * waveSpeed * (uR_c[2] - uL_c[2]),
-    0.5 * (fL[3] + fR[3]) - 0.5 * waveSpeed * (uR_c[3] - uL_c[3]),
-  ];
-}
-
-function rusanovY(
-  rB: number,
-  uB: number,
-  vB: number,
-  pB: number,
-  rT: number,
-  uT: number,
-  vT: number,
-  pT: number,
-  waveSpeed: number,
-): Conserved {
-  const fB = fluxY(rB, uB, vB, pB);
-  const fT = fluxY(rT, uT, vT, pT);
-  const uB_c: Conserved = [rB, rB * uB, rB * vB, pB / (GAMMA - 1) + 0.5 * rB * (uB * uB + vB * vB)];
-  const uT_c: Conserved = [rT, rT * uT, rT * vT, pT / (GAMMA - 1) + 0.5 * rT * (uT * uT + vT * vT)];
-  return [
-    0.5 * (fB[0] + fT[0]) - 0.5 * waveSpeed * (uT_c[0] - uB_c[0]),
-    0.5 * (fB[1] + fT[1]) - 0.5 * waveSpeed * (uT_c[1] - uB_c[1]),
-    0.5 * (fB[2] + fT[2]) - 0.5 * waveSpeed * (uT_c[2] - uB_c[2]),
-    0.5 * (fB[3] + fT[3]) - 0.5 * waveSpeed * (uT_c[3] - uB_c[3]),
-  ];
-}
-
 export function defaultEulerMaxSteps(nx: number, ny: number): number {
   return Math.min(4000, Math.max(1000, Math.round((nx * ny) / 20)));
 }
@@ -186,7 +139,11 @@ export class EulerTunnelSimulator {
   private readonly continuous: boolean;
   private readonly checkInterval = 8;
   private readonly stableChecksRequired = 3;
-  private readonly cfl = 0.35;
+  private readonly cfl = EULER_CFL;
+  private readonly scheme: EulerSolverScheme;
+  private readonly spatialOrder: EulerSpatialOrder;
+  private readonly useMuscl: boolean;
+  private readonly wallMode: EulerWallMode;
   private readonly solid: Uint8Array;
   private readonly aScratch: Float32Array;
 
@@ -224,6 +181,10 @@ export class EulerTunnelSimulator {
     this.cellSize = Math.min(dx, dy);
 
     this.continuous = config.continuous ?? false;
+    this.scheme = config.scheme ?? 'rusanov';
+    this.spatialOrder = config.spatialOrder ?? 'first';
+    this.useMuscl = this.spatialOrder === 'muscl';
+    this.wallMode = config.wallMode ?? 'reflective';
     this.maxSteps = config.steps ?? defaultEulerMaxSteps(nx, ny);
     this.tolerance = config.convergenceTolerance ?? 1e-4;
     this.minSteps = Math.min(300, Math.max(100, Math.floor(this.maxSteps * 0.08)));
@@ -280,7 +241,7 @@ export class EulerTunnelSimulator {
 
     for (let i = 0; i < n; i++) {
       if (this.solid[i]) continue;
-      this.aScratch[i] = soundSpeed(this.rhoA[i], this.pA[i]);
+      this.aScratch[i] = eulerSoundSpeed(this.rhoA[i], this.pA[i]);
     }
 
     let maxLambda = 1;
@@ -343,26 +304,164 @@ export class EulerTunnelSimulator {
         const aB = this.aScratch[idB];
         const aT = this.aScratch[idT];
 
-        const fxR = rusanovX(
-          r, ux, vy, pr,
-          this.rhoA[idR], uR, this.vA[idR], this.pA[idR],
-          Math.max(Math.abs(ux) + aC, Math.abs(uR) + aR),
-        );
-        const fxL = rusanovX(
-          this.rhoA[idL], uL, this.vA[idL], this.pA[idL],
-          r, ux, vy, pr,
-          Math.max(Math.abs(uL) + aL, Math.abs(ux) + aC),
-        );
-        const fyT = rusanovY(
-          r, ux, vy, pr,
-          this.rhoA[idT], this.uA[idT], vT, this.pA[idT],
-          Math.max(Math.abs(vy) + aC, Math.abs(vT) + aT),
-        );
-        const fyB = rusanovY(
-          this.rhoA[idB], this.uA[idB], vB_n, this.pA[idB],
-          r, ux, vy, pr,
-          Math.max(Math.abs(vB_n) + aB, Math.abs(vy) + aC),
-        );
+        let fxR: ReturnType<typeof interfaceFluxX>;
+        let fxL: ReturnType<typeof interfaceFluxX>;
+        let fyT: ReturnType<typeof interfaceFluxY>;
+        let fyB: ReturnType<typeof interfaceFluxY>;
+
+        if (this.useMuscl) {
+          const [fxRightL, fxRightR] = facePrimitivesX(
+            this.spatialOrder,
+            this.rhoA,
+            this.uA,
+            this.vA,
+            this.pA,
+            this.solid,
+            id,
+            idR,
+            this.ny,
+          );
+          const [fxLeftL, fxLeftR] = facePrimitivesX(
+            this.spatialOrder,
+            this.rhoA,
+            this.uA,
+            this.vA,
+            this.pA,
+            this.solid,
+            idL,
+            id,
+            this.ny,
+          );
+          const [fyTopB, fyTopT] = facePrimitivesY(
+            this.spatialOrder,
+            this.rhoA,
+            this.uA,
+            this.vA,
+            this.pA,
+            this.solid,
+            id,
+            idT,
+          );
+          const [fyBotB, fyBotT] = facePrimitivesY(
+            this.spatialOrder,
+            this.rhoA,
+            this.uA,
+            this.vA,
+            this.pA,
+            this.solid,
+            idB,
+            id,
+          );
+          fxR = interfaceFluxX(
+            this.scheme,
+            fxRightL.rho,
+            fxRightL.u,
+            fxRightL.v,
+            fxRightL.p,
+            fxRightR.rho,
+            fxRightR.u,
+            fxRightR.v,
+            fxRightR.p,
+            Math.max(Math.abs(ux) + aC, Math.abs(uR) + aR),
+          );
+          fxL = interfaceFluxX(
+            this.scheme,
+            fxLeftL.rho,
+            fxLeftL.u,
+            fxLeftL.v,
+            fxLeftL.p,
+            fxLeftR.rho,
+            fxLeftR.u,
+            fxLeftR.v,
+            fxLeftR.p,
+            Math.max(Math.abs(uL) + aL, Math.abs(ux) + aC),
+          );
+          fyT = interfaceFluxY(
+            this.scheme,
+            fyTopB.rho,
+            fyTopB.u,
+            fyTopB.v,
+            fyTopB.p,
+            fyTopT.rho,
+            fyTopT.u,
+            fyTopT.v,
+            fyTopT.p,
+            Math.max(Math.abs(vy) + aC, Math.abs(vT) + aT),
+          );
+          fyB = interfaceFluxY(
+            this.scheme,
+            fyBotB.rho,
+            fyBotB.u,
+            fyBotB.v,
+            fyBotB.p,
+            fyBotT.rho,
+            fyBotT.u,
+            fyBotT.v,
+            fyBotT.p,
+            Math.max(Math.abs(vB_n) + aB, Math.abs(vy) + aC),
+          );
+        } else {
+          const rhoL = this.rhoA[idL];
+          const vL = this.vA[idL];
+          const pL = this.pA[idL];
+          const rhoR = this.rhoA[idR];
+          const vR = this.vA[idR];
+          const pR = this.pA[idR];
+          const rhoB = this.rhoA[idB];
+          const uB_n = this.uA[idB];
+          const pB = this.pA[idB];
+          const rhoT = this.rhoA[idT];
+          const uT = this.uA[idT];
+          const pT = this.pA[idT];
+          fxR = interfaceFluxX(
+            this.scheme,
+            r,
+            ux,
+            vy,
+            pr,
+            rhoR,
+            uR,
+            vR,
+            pR,
+            Math.max(Math.abs(ux) + aC, Math.abs(uR) + aR),
+          );
+          fxL = interfaceFluxX(
+            this.scheme,
+            rhoL,
+            uL,
+            vL,
+            pL,
+            r,
+            ux,
+            vy,
+            pr,
+            Math.max(Math.abs(uL) + aL, Math.abs(ux) + aC),
+          );
+          fyT = interfaceFluxY(
+            this.scheme,
+            r,
+            ux,
+            vy,
+            pr,
+            rhoT,
+            uT,
+            vT,
+            pT,
+            Math.max(Math.abs(vy) + aC, Math.abs(vT) + aT),
+          );
+          fyB = interfaceFluxY(
+            this.scheme,
+            rhoB,
+            uB_n,
+            vB_n,
+            pB,
+            r,
+            ux,
+            vy,
+            pr,
+            Math.max(Math.abs(vB_n) + aB, Math.abs(vy) + aC),
+          );
+        }
 
         const dRho = -(fxR[0] - fxL[0]) * this.invDx - (fyT[0] - fyB[0]) * this.invDy;
         const dRhoU = -(fxR[1] - fxL[1]) * this.invDx - (fyT[1] - fyB[1]) * this.invDy;
@@ -423,7 +522,9 @@ export class EulerTunnelSimulator {
       this.converged = true;
     }
 
-    this.syncOutputFields();
+    if (!this.continuous) {
+      this.syncOutputFields();
+    }
   }
 
   steps(count: number): number {
@@ -611,17 +712,29 @@ export class EulerTunnelSimulator {
     }
 
     for (let x = 0; x < nx; x++) {
+      const bot = idx(x, 0, ny);
+      const top = idx(x, ny - 1, ny);
       const botIn = idx(x, 1, ny);
       const topIn = idx(x, ny - 2, ny);
-      rho[idx(x, 0, ny)] = rho[botIn];
-      u[idx(x, 0, ny)] = u[botIn];
-      v[idx(x, 0, ny)] = -v[botIn];
-      p[idx(x, 0, ny)] = p[botIn];
-      const top = idx(x, ny - 1, ny);
-      rho[top] = rho[topIn];
-      u[top] = u[topIn];
-      v[top] = -v[topIn];
-      p[top] = p[topIn];
+      if (this.wallMode === 'open') {
+        rho[bot] = rho[botIn];
+        u[bot] = u[botIn];
+        v[bot] = v[botIn];
+        p[bot] = p[botIn];
+        rho[top] = rho[topIn];
+        u[top] = u[topIn];
+        v[top] = v[topIn];
+        p[top] = p[topIn];
+      } else {
+        rho[bot] = rho[botIn];
+        u[bot] = u[botIn];
+        v[bot] = -v[botIn];
+        p[bot] = p[botIn];
+        rho[top] = rho[topIn];
+        u[top] = u[topIn];
+        v[top] = -v[topIn];
+        p[top] = p[topIn];
+      }
     }
   }
 
@@ -636,7 +749,7 @@ export class EulerTunnelSimulator {
         continue;
       }
       const speed = Math.sqrt(this.uA[i] * this.uA[i] + this.vA[i] * this.vA[i]);
-      const a = soundSpeed(this.rhoA[i], this.pA[i]);
+      const a = eulerSoundSpeed(this.rhoA[i], this.pA[i]);
       this.velocity[i] = speed;
       this.machField[i] = speed / Math.max(a, 1e-6);
       this.pressure[i] = this.pA[i];

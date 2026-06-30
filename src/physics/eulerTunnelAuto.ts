@@ -15,6 +15,10 @@ import { runEulerTunnelWasm, tryInitEulerWasm } from '@/physics/eulerTunnelWasm'
 
 export type EulerTunnelBackend = 'gpu' | 'wasm' | 'cpu';
 
+function eulerUsesCpuOnlyBackend(config: EulerTunnelConfig): boolean {
+  return (config.scheme ?? 'rusanov') !== 'rusanov' || (config.spatialOrder ?? 'first') !== 'first';
+}
+
 function defaultMaxSteps(nx: number, ny: number): number {
   return Math.min(4000, Math.max(1000, Math.round((nx * ny) / 20)));
 }
@@ -105,6 +109,9 @@ export async function runEulerTunnelWasmPath(
   onProgress?: (progress: number, backend: EulerTunnelBackend) => void,
   shouldCancel?: () => boolean,
 ): Promise<EulerTunnelResult> {
+  if (eulerUsesCpuOnlyBackend(config)) {
+    throw new Error('WASM backend currently supports Rusanov + 1st order only');
+  }
   if (shouldCancel?.()) {
     throw new Error('cancelled');
   }
@@ -149,6 +156,15 @@ export async function runEulerTunnelAuto(
   onProgress?: (progress: number, backend: EulerTunnelBackend) => void,
   shouldCancel?: () => boolean,
 ): Promise<{ result: EulerTunnelResult; backend: EulerTunnelBackend }> {
+  if (eulerUsesCpuOnlyBackend(config)) {
+    const result = runEulerTunnel(
+      config,
+      (progress) => onProgress?.(progress, 'cpu'),
+      () => shouldCancel?.() ?? false,
+    );
+    return { result, backend: 'cpu' };
+  }
+
   // WASM first (fast, worker-safe). CPU fallback. GPU disabled until atomics are fixed.
   try {
     await tryInitEulerWasm();

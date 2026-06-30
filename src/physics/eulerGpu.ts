@@ -1,5 +1,6 @@
 import shaderSource from './eulerGpu.wgsl?raw';
 import { GAMMA } from '@/physics/constants';
+import { EULER_CFL } from '@/physics/eulerFlux';
 
 export type EulerGpuBackend = 'gpu';
 
@@ -12,7 +13,6 @@ export interface EulerGpuSimParams {
   obstacle: Uint8Array;
 }
 
-const CFL = 0.35;
 const LAMBDA_INIT_BITS = 0x3f800000; // f32 1.0
 
 function packUniformsFull(
@@ -35,7 +35,7 @@ function packUniformsFull(
   f32[4] = p0;
   f32[5] = invDx;
   f32[6] = invDy;
-  f32[7] = CFL;
+  f32[7] = EULER_CFL;
   f32[8] = cellSize;
   return buf;
 }

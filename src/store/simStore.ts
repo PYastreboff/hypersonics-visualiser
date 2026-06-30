@@ -10,6 +10,9 @@ import type {
   LbmPrerenderStatus,
   EulerTunnelStatus,
   EulerRunMode,
+  EulerSolverScheme,
+  EulerSpatialOrder,
+  EulerWallMode,
   LbmRunMode,
   LbmShapeInput,
   PlacedShape,
@@ -80,6 +83,9 @@ interface SimState {
   eulerTunnelSeed: number;
   eulerFlowRevision: number;
   eulerRunMode: EulerRunMode;
+  eulerSolverScheme: EulerSolverScheme;
+  eulerSpatialOrder: EulerSpatialOrder;
+  eulerWallMode: EulerWallMode;
   lbmResolutionScale: number;
   lbmTunnelNx: number;
   lbmTunnelNy: number;
@@ -136,6 +142,9 @@ interface SimState {
     }>,
   ) => void;
   setEulerRunMode: (mode: EulerRunMode) => void;
+  setEulerSolverScheme: (scheme: EulerSolverScheme) => void;
+  setEulerSpatialOrder: (order: EulerSpatialOrder) => void;
+  setEulerWallMode: (mode: EulerWallMode) => void;
   runEulerTunnelSimulation: () => void;
   setLbmWindSpeed: (speed: number) => void;
   setLbmFluidDensity: (density: number) => void;
@@ -201,6 +210,9 @@ export const useSimStore = create<SimState>((set, get) => ({
   eulerTunnelSeed: 0,
   eulerFlowRevision: 0,
   eulerRunMode: 'live',
+  eulerSolverScheme: 'rusanov',
+  eulerSpatialOrder: 'first',
+  eulerWallMode: 'reflective',
   lbmResolutionScale: 1,
   lbmTunnelNx: 300,
   lbmTunnelNy: 100,
@@ -353,6 +365,24 @@ export const useSimStore = create<SimState>((set, get) => ({
       eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
       eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
       lbmPlaying: s.lbmPhysicsMode === 'euler' && mode === 'live',
+    })),
+  setEulerSolverScheme: (scheme) =>
+    set((s) => ({
+      eulerSolverScheme: scheme,
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
+    })),
+  setEulerSpatialOrder: (order) =>
+    set((s) => ({
+      eulerSpatialOrder: order,
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
+    })),
+  setEulerWallMode: (mode) =>
+    set((s) => ({
+      eulerWallMode: mode,
+      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
+      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
     })),
   runEulerTunnelSimulation: () =>
     set((s) => ({

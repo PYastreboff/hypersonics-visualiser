@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useSimStore } from '@/store/simStore';
-import type { LbmShapeInput, LbmShapeType, LbmDisplayMode } from '@/types';
+import type {
+  LbmShapeInput,
+  LbmShapeType,
+  LbmDisplayMode,
+  EulerSolverScheme,
+  EulerSpatialOrder,
+  EulerWallMode,
+} from '@/types';
+import { EULER_FLUX_SCHEME_LABELS } from '@/physics/eulerFlux';
 import {
   LBM_RESOLUTION_SCALES,
   LBM_MIN_TUNNEL_NX,
@@ -20,7 +28,7 @@ import {
 } from '@/physics/lbmConfig';
 import { detectRegime, regimeLabel } from '@/physics/regimes';
 import { formatDragCoefficient } from '@/physics/tunnelDrag';
-import { nextLbmShapeId } from '@/physics/lbmObstacles';
+import { nextLbmShapeId, defaultLbmShapeGeometry, shapeInputForType } from '@/physics/lbmObstacles';
 import { SettingLabel } from './SettingLabel';
 import { NumInput } from './NumInput';
 
@@ -80,25 +88,9 @@ function ShapeCard({
   onSelect: () => void;
 }) {
   const setType = (type: LbmShapeType) => {
-    if (type === 'custom') return;
-    const next: LbmShapeInput = { ...shape, type };
-    if (type === 'airfoil') {
-      next.chord = shape.chord ?? 80;
-      next.naca = shape.naca ?? '0012';
-    } else if (type === 'square') {
-      next.width = shape.width ?? 20;
-      next.height = shape.height ?? 20;
-    } else if (type === 'doubleWedge') {
-      next.width = shape.width ?? 60;
-      next.height = shape.height ?? 24;
-    } else {
-      next.radius = shape.radius ?? 12;
-    }
-    delete next.name;
-    delete next.customScale;
-    delete next.stencilX;
-    delete next.stencilY;
-    onChange(next);
+    if (type === 'custom' || type === shape.type) return;
+    onChange(shapeInputForType(shape, type));
+    onMoveCommit();
   };
 
   return (
@@ -148,7 +140,8 @@ function ShapeCard({
           disabled={shape.type === 'custom'}
         >
           <option value="airfoil">Airfoil</option>
-          <option value="square">Square</option>
+          <option value="flatPlate">Flat plate</option>
+          <option value="square">Block</option>
           <option value="circle">Circle</option>
           <option value="doubleWedge">Double wedge</option>
           {shape.type === 'custom' && (
@@ -197,6 +190,36 @@ function ShapeCard({
               className="num-input"
             />
           </label>
+        </div>
+      )}
+
+      {shape.type === 'flatPlate' && (
+        <p className="lbm-custom-shape-note">
+          Thin streamwise plate (1 cell thick). Use Block for a blunt rectangle that will shock the flow head-on.
+        </p>
+      )}
+
+      {shape.type === 'square' && (
+        <p className="lbm-custom-shape-note">
+          Solid rectangle — upstream face is blunt at 0° AoA (bow-shock-like in supersonic Euler).
+        </p>
+      )}
+
+      {shape.type === 'flatPlate' && (
+        <div className="lbm-field-grid">
+          <NumField
+            label="Length"
+            value={shape.width ?? 80}
+            onChange={(width) => onChange({ ...shape, width })}
+            min={1}
+          />
+          <NumField
+            label="Thickness (cells)"
+            value={shape.height ?? 1}
+            onChange={(height) => onChange({ ...shape, height: Math.max(1, Math.round(height)) })}
+            min={1}
+            max={4}
+          />
         </div>
       )}
 
@@ -286,6 +309,9 @@ export function LbmControlPanel() {
     eulerTunnelProgress,
     tunnelCd,
     eulerRunMode,
+    eulerSolverScheme,
+    eulerSpatialOrder,
+    eulerWallMode,
     lbmInteractionMode,
     lbmBrushRadius,
     lbmDrawDensity,
@@ -305,6 +331,9 @@ export function LbmControlPanel() {
     setLbmTunnelNy,
     setLbmRunMode,
     setEulerRunMode,
+    setEulerSolverScheme,
+    setEulerSpatialOrder,
+    setEulerWallMode,
     updateLbmShape,
     updateLbmShapePosition,
     commitLbmShapeLayout,
@@ -363,15 +392,16 @@ export function LbmControlPanel() {
   const effectiveGrid = lbmGridSize(lbmTunnelNx, lbmTunnelNy, lbmResolutionScale);
 
   const addShape = () => {
+    const type = 'square';
+    const geom = defaultLbmShapeGeometry(type);
     addLbmShape({
       id: nextLbmShapeId(),
-      type: 'square',
+      type,
       cx: 150,
       cy: 50,
-      width: 20,
-      height: 20,
       aoa: 0,
-    });
+      ...geom,
+    } as LbmShapeInput);
   };
 
   return (
@@ -400,6 +430,54 @@ export function LbmControlPanel() {
             Inviscid Euler — educational. No viscosity, boundary layers, or real-gas effects.
             Mach 0–12 (subsonic through hypersonic). Use Mach or Pressure view for shocks (Ma &gt; 1).
           </p>
+        )}
+
+        {isEuler && (
+          <SettingLabel
+            label="Flux scheme"
+            tip="Interface Riemann solver. Rusanov is most robust; HLLC/Roe sharpen shocks. AUSM+ uses pure splitting at supersonic faces and HLLC elsewhere for stability."
+          >
+            <select
+              value={eulerSolverScheme}
+              onChange={(e) => setEulerSolverScheme(e.target.value as EulerSolverScheme)}
+            >
+              {(Object.keys(EULER_FLUX_SCHEME_LABELS) as EulerSolverScheme[]).map((scheme) => (
+                <option key={scheme} value={scheme}>
+                  {EULER_FLUX_SCHEME_LABELS[scheme]}
+                </option>
+              ))}
+            </select>
+          </SettingLabel>
+        )}
+
+        {isEuler && (
+          <SettingLabel
+            label="Spatial order"
+            tip="1st order is piecewise-constant. MUSCL (minmod) adds 2nd-order reconstruction — sharper but less robust near shocks."
+          >
+            <select
+              value={eulerSpatialOrder}
+              onChange={(e) => setEulerSpatialOrder(e.target.value as EulerSpatialOrder)}
+            >
+              <option value="first">1st order</option>
+              <option value="muscl">MUSCL (2nd order)</option>
+            </select>
+          </SettingLabel>
+        )}
+
+        {isEuler && (
+          <SettingLabel
+            label="Wall interaction"
+            tip="Reflective uses tunnel slip walls. Open uses transmissive top/bottom boundaries so waves keep leaving instead of reflecting."
+          >
+            <select
+              value={eulerWallMode}
+              onChange={(e) => setEulerWallMode(e.target.value as EulerWallMode)}
+            >
+              <option value="reflective">Reflective slip walls</option>
+              <option value="open">Open / transmissive</option>
+            </select>
+          </SettingLabel>
         )}
       </div>
 

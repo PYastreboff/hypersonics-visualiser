@@ -57,20 +57,12 @@ fn rusanovX(
   let fR = fluxX(rR, uR, vR, pR);
   let eL = pL / GAMMA_M1 + 0.5 * rL * (uL * uL + vL * vL);
   let eR = pR / GAMMA_M1 + 0.5 * rR * (uR * uR + vR * vR);
-  let uL0 = rL;
-  let uL1 = rL * uL;
-  let uL2 = rL * vL;
-  let uL3 = eL;
-  let uR0 = rR;
-  let uR1 = rR * uR;
-  let uR2 = rR * vR;
-  let uR3 = eR;
   let halfS = 0.5 * waveSpeed;
   return Flux4(
-    0.5 * (fL.f0 + fR.f0) - halfS * (uR0 - uL0),
-    0.5 * (fL.f1 + fR.f1) - halfS * (uR1 - uL1),
-    0.5 * (fL.f2 + fR.f2) - halfS * (uR2 - uL2),
-    0.5 * (fL.f3 + fR.f3) - halfS * (uR3 - uL3),
+    0.5 * (fL.f0 + fR.f0) - halfS * (rR - rL),
+    0.5 * (fL.f1 + fR.f1) - halfS * (rR * uR - rL * uL),
+    0.5 * (fL.f2 + fR.f2) - halfS * (rR * vR - rL * vL),
+    0.5 * (fL.f3 + fR.f3) - halfS * (eR - eL),
   );
 }
 

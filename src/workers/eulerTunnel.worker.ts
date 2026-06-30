@@ -14,12 +14,15 @@ self.onmessage = async (e: MessageEvent) => {
   const generation = ++runGeneration;
   const isCancelled = () => generation !== runGeneration;
 
-  const { nx, ny, mach, altitude, obstacle } = e.data;
+  const { nx, ny, mach, altitude, scheme, spatialOrder, wallMode, obstacle } = e.data;
   const config = {
     nx,
     ny,
     mach,
     altitude,
+    scheme,
+    spatialOrder,
+    wallMode,
     obstacle: new Uint8Array(obstacle),
   };
 

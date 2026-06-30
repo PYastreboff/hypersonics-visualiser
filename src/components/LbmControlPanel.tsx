@@ -173,6 +173,22 @@ function ShapeCard({
         />
       </div>
 
+      <label className="checkbox lbm-slip-checkbox-row">
+        <input
+          type="checkbox"
+          checked={!!shape.slipWall}
+          onChange={(e) => onChange({ ...shape, slipWall: e.target.checked })}
+        />
+        Slip wall (Euler)
+        <span
+          className="lbm-slip-checkbox-info"
+          title="Euler only: applies slip-wall reflection on this shape surface (normal velocity reflected, tangential velocity preserved)."
+          aria-label="Slip wall info"
+        >
+          i
+        </span>
+      </label>
+
       {shape.type === 'airfoil' && (
         <div className="lbm-field-grid">
           <NumField
@@ -196,12 +212,6 @@ function ShapeCard({
       {shape.type === 'flatPlate' && (
         <p className="lbm-custom-shape-note">
           Thin streamwise plate (1 cell thick). Use Block for a blunt rectangle that will shock the flow head-on.
-        </p>
-      )}
-
-      {shape.type === 'square' && (
-        <p className="lbm-custom-shape-note">
-          Solid rectangle — upstream face is blunt at 0° AoA (bow-shock-like in supersonic Euler).
         </p>
       )}
 
@@ -400,6 +410,7 @@ export function LbmControlPanel() {
       cx: 150,
       cy: 50,
       aoa: 0,
+      slipWall: false,
       ...geom,
     } as LbmShapeInput);
   };
@@ -479,6 +490,18 @@ export function LbmControlPanel() {
             </select>
           </SettingLabel>
         )}
+
+        <SettingLabel label="Colour field" tip="What to show in the flow visualisation">
+          <select
+            value={lbmDisplayMode}
+            onChange={(e) => setLbmDisplayMode(e.target.value as LbmDisplayMode)}
+          >
+            <option value="velocity">Velocity magnitude</option>
+            {isEuler && <option value="mach">Mach</option>}
+            <option value="pressure">Pressure</option>
+            {isEuler && <option value="temperature">Temperature</option>}
+          </select>
+        </SettingLabel>
       </div>
 
       <div className="control-group">
@@ -555,18 +578,6 @@ export function LbmControlPanel() {
             Typical values: sphere ~0.44 (subsonic), streamlined body ~0.05–0.15, blunt hypersonic body
             often 1+. Updates as the flow field changes.
           </p>
-        </SettingLabel>
-
-        <SettingLabel label="Colour field" tip="What to show in the flow visualisation">
-          <select
-            value={lbmDisplayMode}
-            onChange={(e) => setLbmDisplayMode(e.target.value as LbmDisplayMode)}
-          >
-            <option value="velocity">Velocity magnitude</option>
-            {isEuler && <option value="mach">Mach</option>}
-            <option value="pressure">Pressure</option>
-            {isEuler && <option value="temperature">Temperature</option>}
-          </select>
         </SettingLabel>
 
         {!isEuler && (

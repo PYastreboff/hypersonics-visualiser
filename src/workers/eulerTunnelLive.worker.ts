@@ -11,6 +11,7 @@ import type { LbmDisplayMode, EulerSolverScheme, EulerSpatialOrder, EulerWallMod
 let generation = 0;
 let sim: EulerTunnelSimulator | null = null;
 let obstacle: Uint8Array | null = null;
+let obstacleSlip: Uint8Array | null = null;
 let nx = 0;
 let ny = 0;
 
@@ -95,10 +96,12 @@ self.onmessage = async (e: MessageEvent) => {
     eulerSpatialOrder = msg.spatialOrder ?? 'first';
     eulerWallMode = msg.wallMode ?? 'reflective';
     obstacle = new Uint8Array(msg.obstacle);
+    obstacleSlip = msg.obstacleSlip ? new Uint8Array(msg.obstacleSlip) : new Uint8Array(nx * ny);
     sim = new EulerTunnelSimulator({
       nx,
       ny,
       obstacle,
+      obstacleSlip: obstacleSlip,
       mach: eulerMach,
       altitude: eulerAltitude,
       scheme: eulerScheme,
@@ -120,7 +123,8 @@ self.onmessage = async (e: MessageEvent) => {
 
   if (msg.type === 'updateObstacle') {
     obstacle = new Uint8Array(msg.obstacle);
-    sim.updateObstacle(obstacle);
+    obstacleSlip = msg.obstacleSlip ? new Uint8Array(msg.obstacleSlip) : obstacleSlip;
+    sim.updateObstacle(obstacle, obstacleSlip ?? undefined);
     await postFrame();
     return;
   }
@@ -141,7 +145,8 @@ self.onmessage = async (e: MessageEvent) => {
   if (msg.type === 'step') {
     if (msg.obstacle) {
       obstacle = new Uint8Array(msg.obstacle);
-      sim.updateObstacle(obstacle);
+      if (msg.obstacleSlip) obstacleSlip = new Uint8Array(msg.obstacleSlip);
+      sim.updateObstacle(obstacle, obstacleSlip ?? undefined);
     }
     if (typeof msg.mach === 'number') {
       eulerMach = msg.mach;

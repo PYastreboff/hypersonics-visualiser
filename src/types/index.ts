@@ -55,6 +55,8 @@ export interface LbmShapeInput {
   cx: number;
   cy: number;
   aoa: number;
+  /** Euler-only: treat obstacle as inviscid slip wall. */
+  slipWall?: boolean;
   chord?: number;
   naca?: string;
   width?: number;

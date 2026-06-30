@@ -14,7 +14,7 @@ self.onmessage = async (e: MessageEvent) => {
   const generation = ++runGeneration;
   const isCancelled = () => generation !== runGeneration;
 
-  const { nx, ny, mach, altitude, scheme, spatialOrder, wallMode, obstacle } = e.data;
+  const { nx, ny, mach, altitude, scheme, spatialOrder, wallMode, obstacle, obstacleSlip } = e.data;
   const config = {
     nx,
     ny,
@@ -24,6 +24,7 @@ self.onmessage = async (e: MessageEvent) => {
     spatialOrder,
     wallMode,
     obstacle: new Uint8Array(obstacle),
+    obstacleSlip: obstacleSlip ? new Uint8Array(obstacleSlip) : undefined,
   };
 
   try {

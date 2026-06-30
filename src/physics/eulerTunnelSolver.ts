@@ -18,6 +18,7 @@ export interface EulerTunnelConfig {
   nx: number;
   ny: number;
   obstacle: Uint8Array;
+  obstacleSlip?: Uint8Array;
   mach: number;
   altitude: number;
   steps?: number;
@@ -145,6 +146,7 @@ export class EulerTunnelSimulator {
   private readonly useMuscl: boolean;
   private readonly wallMode: EulerWallMode;
   private readonly solid: Uint8Array;
+  private readonly solidSlip: Uint8Array;
   private readonly aScratch: Float32Array;
 
   private rhoA: Float32Array;
@@ -199,6 +201,7 @@ export class EulerTunnelSimulator {
     this.pB = new Float32Array(this.n);
     this.aScratch = new Float32Array(this.n);
     this.solid = new Uint8Array(this.n);
+    this.solidSlip = new Uint8Array(this.n);
     this.velocity = new Float32Array(this.n);
     this.machField = new Float32Array(this.n);
     this.pressure = new Float32Array(this.n);
@@ -208,6 +211,7 @@ export class EulerTunnelSimulator {
       for (let y = 0; y < ny; y++) {
         const id = idx(x, y, ny);
         this.solid[id] = obstacle[id];
+        this.solidSlip[id] = obstacle[id] && config.obstacleSlip?.[id] ? 1 : 0;
         if (this.solid[id]) {
           this.rhoA[id] = this.rho0;
           this.uA[id] = 0;
@@ -310,7 +314,7 @@ export class EulerTunnelSimulator {
         let fyB: ReturnType<typeof interfaceFluxY>;
 
         if (this.useMuscl) {
-          const [fxRightL, fxRightR] = facePrimitivesX(
+          let [fxRightL, fxRightR] = facePrimitivesX(
             this.spatialOrder,
             this.rhoA,
             this.uA,
@@ -321,7 +325,7 @@ export class EulerTunnelSimulator {
             idR,
             this.ny,
           );
-          const [fxLeftL, fxLeftR] = facePrimitivesX(
+          let [fxLeftL, fxLeftR] = facePrimitivesX(
             this.spatialOrder,
             this.rhoA,
             this.uA,
@@ -332,7 +336,7 @@ export class EulerTunnelSimulator {
             id,
             this.ny,
           );
-          const [fyTopB, fyTopT] = facePrimitivesY(
+          let [fyTopB, fyTopT] = facePrimitivesY(
             this.spatialOrder,
             this.rhoA,
             this.uA,
@@ -342,7 +346,7 @@ export class EulerTunnelSimulator {
             id,
             idT,
           );
-          const [fyBotB, fyBotT] = facePrimitivesY(
+          let [fyBotB, fyBotT] = facePrimitivesY(
             this.spatialOrder,
             this.rhoA,
             this.uA,
@@ -352,6 +356,19 @@ export class EulerTunnelSimulator {
             idB,
             id,
           );
+          if (this.solid[idR] && this.solidSlip[idR]) {
+            fxRightR = { rho: fxRightL.rho, u: -fxRightL.u, v: fxRightL.v, p: fxRightL.p };
+          }
+          if (this.solid[idL] && this.solidSlip[idL]) {
+            fxLeftL = { rho: fxLeftR.rho, u: -fxLeftR.u, v: fxLeftR.v, p: fxLeftR.p };
+          }
+          if (this.solid[idT] && this.solidSlip[idT]) {
+            fyTopT = { rho: fyTopB.rho, u: fyTopB.u, v: -fyTopB.v, p: fyTopB.p };
+          }
+          if (this.solid[idB] && this.solidSlip[idB]) {
+            fyBotB = { rho: fyBotT.rho, u: fyBotT.u, v: -fyBotT.v, p: fyBotT.p };
+          }
+
           fxR = interfaceFluxX(
             this.scheme,
             fxRightL.rho,
@@ -401,18 +418,22 @@ export class EulerTunnelSimulator {
             Math.max(Math.abs(vB_n) + aB, Math.abs(vy) + aC),
           );
         } else {
-          const rhoL = this.rhoA[idL];
-          const vL = this.vA[idL];
-          const pL = this.pA[idL];
-          const rhoR = this.rhoA[idR];
-          const vR = this.vA[idR];
-          const pR = this.pA[idR];
-          const rhoB = this.rhoA[idB];
-          const uB_n = this.uA[idB];
-          const pB = this.pA[idB];
-          const rhoT = this.rhoA[idT];
-          const uT = this.uA[idT];
-          const pT = this.pA[idT];
+          const rhoL = this.solid[idL] && this.solidSlip[idL] ? r : this.rhoA[idL];
+          const uL_n = this.solid[idL] && this.solidSlip[idL] ? -ux : uL;
+          const vL = this.solid[idL] && this.solidSlip[idL] ? vy : this.vA[idL];
+          const pL = this.solid[idL] && this.solidSlip[idL] ? pr : this.pA[idL];
+          const rhoR = this.solid[idR] && this.solidSlip[idR] ? r : this.rhoA[idR];
+          const uR_n = this.solid[idR] && this.solidSlip[idR] ? -ux : uR;
+          const vR = this.solid[idR] && this.solidSlip[idR] ? vy : this.vA[idR];
+          const pR = this.solid[idR] && this.solidSlip[idR] ? pr : this.pA[idR];
+          const rhoB = this.solid[idB] && this.solidSlip[idB] ? r : this.rhoA[idB];
+          const uB_n = this.solid[idB] && this.solidSlip[idB] ? ux : this.uA[idB];
+          const vB_face = this.solid[idB] && this.solidSlip[idB] ? -vy : vB_n;
+          const pB = this.solid[idB] && this.solidSlip[idB] ? pr : this.pA[idB];
+          const rhoT = this.solid[idT] && this.solidSlip[idT] ? r : this.rhoA[idT];
+          const uT = this.solid[idT] && this.solidSlip[idT] ? ux : this.uA[idT];
+          const vT_face = this.solid[idT] && this.solidSlip[idT] ? -vy : vT;
+          const pT = this.solid[idT] && this.solidSlip[idT] ? pr : this.pA[idT];
           fxR = interfaceFluxX(
             this.scheme,
             r,
@@ -420,7 +441,7 @@ export class EulerTunnelSimulator {
             vy,
             pr,
             rhoR,
-            uR,
+            uR_n,
             vR,
             pR,
             Math.max(Math.abs(ux) + aC, Math.abs(uR) + aR),
@@ -428,7 +449,7 @@ export class EulerTunnelSimulator {
           fxL = interfaceFluxX(
             this.scheme,
             rhoL,
-            uL,
+            uL_n,
             vL,
             pL,
             r,
@@ -445,7 +466,7 @@ export class EulerTunnelSimulator {
             pr,
             rhoT,
             uT,
-            vT,
+            vT_face,
             pT,
             Math.max(Math.abs(vy) + aC, Math.abs(vT) + aT),
           );
@@ -453,7 +474,7 @@ export class EulerTunnelSimulator {
             this.scheme,
             rhoB,
             uB_n,
-            vB_n,
+            vB_face,
             pB,
             r,
             ux,
@@ -537,7 +558,7 @@ export class EulerTunnelSimulator {
   }
 
   /** Patch obstacle mask in-place and resume iterating toward a new steady state. */
-  updateObstacle(obstacle: Uint8Array): void {
+  updateObstacle(obstacle: Uint8Array, obstacleSlip?: Uint8Array): void {
     if (obstacle.length !== this.n) return;
 
     const wasSolid = new Uint8Array(this.solid);
@@ -555,6 +576,7 @@ export class EulerTunnelSimulator {
       }
 
       this.solid[id] = isSolid ? 1 : 0;
+      this.solidSlip[id] = isSolid && obstacleSlip?.[id] ? 1 : 0;
     }
 
     this.fillNewlyFluidCells(newlyFluid);

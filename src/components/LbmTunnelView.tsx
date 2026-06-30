@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSimStore } from '@/store/simStore';
 import {
+  buildObstacleData,
   buildObstacleMask,
   lbmInputToSpec,
   nextLbmShapeId,
@@ -116,6 +117,7 @@ export function LbmTunnelView() {
   const eulerResultRef = useRef<EulerTunnelResult | null>(null);
   const eulerWorkerRef = useRef<Worker | null>(null);
   const obstacleRef = useRef<Uint8Array | null>(null);
+  const obstacleSlipRef = useRef<Uint8Array | null>(null);
   const dragRef = useRef<{
     shapeId: string;
     startGx: number;
@@ -358,27 +360,30 @@ export function LbmTunnelView() {
     });
   }, []);
 
-  const postObstacleToLiveWorker = useCallback((obstacle: Uint8Array) => {
+  const postObstacleToLiveWorker = useCallback((obstacle: Uint8Array, obstacleSlip: Uint8Array | null) => {
     const worker = liveWorkerRef.current;
     if (!worker) return;
 
     if (liveWorkerBusyRef.current) {
       pendingObstacleRef.current = new Uint8Array(obstacle);
+      if (obstacleSlip) obstacleSlipRef.current = new Uint8Array(obstacleSlip);
       return;
     }
 
     liveWorkerBusyRef.current = true;
     const obstacleCopy = new Uint8Array(obstacle);
-    worker.worker.postMessage({ type: 'updateObstacle', obstacle: obstacleCopy.buffer }, [
-      obstacleCopy.buffer,
-    ]);
+    const slipCopy = obstacleSlip ? new Uint8Array(obstacleSlip) : new Uint8Array(obstacleCopy.length);
+    worker.worker.postMessage(
+      { type: 'updateObstacle', obstacle: obstacleCopy.buffer, obstacleSlip: slipCopy.buffer },
+      [obstacleCopy.buffer, slipCopy.buffer],
+    );
   }, []);
 
   const flushPendingObstacle = useCallback(() => {
     const pending = pendingObstacleRef.current;
     if (!pending) return;
     pendingObstacleRef.current = null;
-    postObstacleToLiveWorker(pending);
+    postObstacleToLiveWorker(pending, obstacleSlipRef.current);
   }, [postObstacleToLiveWorker]);
 
   const requestLiveStep = useCallback(
@@ -392,8 +397,12 @@ export function LbmTunnelView() {
 
       if (obstacleDirtyRef.current && obstacleRef.current) {
         const copy = new Uint8Array(obstacleRef.current);
+        const slipCopy = obstacleSlipRef.current
+          ? new Uint8Array(obstacleSlipRef.current)
+          : new Uint8Array(copy.length);
         message.obstacle = copy.buffer;
-        transfers.push(copy.buffer);
+        message.obstacleSlip = slipCopy.buffer;
+        transfers.push(copy.buffer, slipCopy.buffer);
         obstacleDirtyRef.current = false;
       }
 
@@ -546,7 +555,7 @@ export function LbmTunnelView() {
       shapes.map(lbmInputToSpec),
       lbmResolutionScale,
     );
-    return buildObstacleMask(nx, ny, specs);
+    return buildObstacleData(nx, ny, specs);
   }, [nx, ny, lbmResolutionScale]);
 
   const updateHoverHighlight = useCallback(
@@ -800,13 +809,20 @@ export function LbmTunnelView() {
   }, [lbmPlaying]);
 
   const rebuildObstacleVisual = useCallback(() => {
-    const newMask = buildObstacle();
+    const { obstacle: newMask, obstacleSlip: newSlip } = buildObstacle();
     let obstacle = obstacleRef.current;
     if (!obstacle || obstacle.length !== newMask.length) {
       obstacle = new Uint8Array(newMask);
       obstacleRef.current = obstacle;
     } else {
       obstacle.set(newMask);
+    }
+    let obstacleSlip = obstacleSlipRef.current;
+    if (!obstacleSlip || obstacleSlip.length !== newSlip.length) {
+      obstacleSlip = new Uint8Array(newSlip);
+      obstacleSlipRef.current = obstacleSlip;
+    } else {
+      obstacleSlip.set(newSlip);
     }
 
     const worker = liveWorkerRef.current;
@@ -818,7 +834,7 @@ export function LbmTunnelView() {
       if (dragRef.current) {
         obstacleDirtyRef.current = true;
       } else {
-        postObstacleToLiveWorker(obstacle);
+        postObstacleToLiveWorker(obstacle, obstacleSlip);
       }
     }
 
@@ -855,6 +871,7 @@ export function LbmTunnelView() {
     );
     const obstacle = buildObstacleMask(nx, ny, specs);
     obstacleRef.current = obstacle;
+    obstacleSlipRef.current = new Uint8Array(obstacle.length);
     const obstacleCopy = obstacle.slice();
     const state = useSimStore.getState();
     const generation = Date.now();
@@ -901,9 +918,11 @@ export function LbmTunnelView() {
     cancelEulerRun();
 
     const runId = ++eulerRunIdRef.current;
-    const obstacle = buildObstacle();
+    const { obstacle, obstacleSlip } = buildObstacle();
     obstacleRef.current = obstacle;
+    obstacleSlipRef.current = obstacleSlip;
     const obstacleCopy = new Uint8Array(obstacle);
+    const obstacleSlipCopy = new Uint8Array(obstacleSlip);
     const {
       lbmEulerMach,
       lbmEulerAltitude,
@@ -995,17 +1014,20 @@ export function LbmTunnelView() {
         spatialOrder: eulerSpatialOrder,
         wallMode: eulerWallMode,
         obstacle: obstacleCopy.buffer,
+        obstacleSlip: obstacleSlipCopy.buffer,
       },
-      [obstacleCopy.buffer],
+      [obstacleCopy.buffer, obstacleSlipCopy.buffer],
     );
   }, [buildObstacle, cancelEulerRun, nx, ny, setEulerTunnelState]);
 
   const initEulerLive = useCallback(() => {
     cancelEulerRun();
     cancelLiveWorker();
-    const obstacle = buildObstacle();
+    const { obstacle, obstacleSlip } = buildObstacle();
     obstacleRef.current = obstacle;
+    obstacleSlipRef.current = obstacleSlip;
     const obstacleCopy = obstacle.slice();
+    const obstacleSlipCopy = obstacleSlip.slice();
     const state = useSimStore.getState();
     const generation = Date.now();
     const worker = createLiveWorker('euler');
@@ -1031,8 +1053,9 @@ export function LbmTunnelView() {
         windSpeed: state.lbmWindSpeed,
         fluidDensity: state.lbmFluidDensity,
         obstacle: obstacleCopy.buffer,
+        obstacleSlip: obstacleSlipCopy.buffer,
       },
-      [obstacleCopy.buffer],
+      [obstacleCopy.buffer, obstacleSlipCopy.buffer],
     );
   }, [
     attachLiveWorker,
@@ -1582,6 +1605,7 @@ export function LbmTunnelView() {
           cx,
           cy,
           aoa: 0,
+          slipWall: false,
           customScale: 1,
           ...stencilArraysFromKeys(stencilKeys),
         });

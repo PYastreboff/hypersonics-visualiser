@@ -5,6 +5,7 @@ export interface LbmShapeSpec {
   cx: number;
   cy: number;
   aoa: number;
+  slipWall?: boolean;
   width?: number;
   height?: number;
   radius?: number;
@@ -43,6 +44,7 @@ export function shapeInputForType(shape: LbmShapeInput, type: LbmShapeType): Lbm
     cx: shape.cx,
     cy: shape.cy,
     aoa: type === 'flatPlate' ? 0 : shape.aoa,
+    slipWall: shape.slipWall ?? false,
     type,
   };
   const geom = defaultLbmShapeGeometry(type);
@@ -67,6 +69,7 @@ export function lbmInputToSpec(shape: LbmShapeInput): LbmShapeSpec {
     cx: shape.cx,
     cy: shape.cy,
     aoa: shape.aoa,
+    slipWall: shape.slipWall ?? false,
     chord: shape.chord,
     naca: shape.naca,
     width: shape.width,
@@ -203,6 +206,22 @@ export function buildObstacleMask(
   }
 
   return obstacle;
+}
+
+export function buildObstacleData(
+  nx: number,
+  ny: number,
+  shapes: LbmShapeSpec[],
+): { obstacle: Uint8Array; obstacleSlip: Uint8Array } {
+  const obstacle = buildObstacleMask(nx, ny, shapes);
+  const slipShapes = shapes.filter((shape) => shape.slipWall);
+  const nonSlipShapes = shapes.filter((shape) => !shape.slipWall);
+  const obstacleSlip = buildObstacleMask(nx, ny, slipShapes);
+  const nonSlip = buildObstacleMask(nx, ny, nonSlipShapes);
+  for (let i = 0; i < obstacleSlip.length; i++) {
+    if (!obstacle[i] || nonSlip[i]) obstacleSlip[i] = 0;
+  }
+  return { obstacle, obstacleSlip };
 }
 
 function stampCustom(

@@ -20,7 +20,7 @@ function latticeField(mode: LbmDisplayMode): 'velocity' | 'pressure' {
   return mode === 'pressure' ? 'pressure' : 'velocity';
 }
 
-async function postFrame() {
+async function postFrame(didStep: boolean) {
   if (!solver || !obstacle) return;
 
   const metric = solver.getMetric(latticeField(displayMode));
@@ -40,6 +40,7 @@ async function postFrame() {
   const transfers: Transferable[] = [bitmap];
   const payload: Record<string, unknown> = {
     type: 'frame',
+    didStep,
     vmin,
     vmax,
     bitmap,
@@ -76,7 +77,7 @@ self.onmessage = async (e: MessageEvent) => {
     fluidDensity = msg.fluidDensity;
     obstacle = new Uint8Array(msg.obstacle);
     solver = new LbmSolver({ nx, ny, windSpeed, rho0: fluidDensity }, obstacle);
-    await postFrame();
+    await postFrame(false);
     return;
   }
 
@@ -84,33 +85,33 @@ self.onmessage = async (e: MessageEvent) => {
 
   if (msg.type === 'setDisplayMode') {
     displayMode = msg.displayMode;
-    await postFrame();
+    await postFrame(false);
     return;
   }
 
   if (msg.type === 'updateObstacle') {
     obstacle = new Uint8Array(msg.obstacle);
     solver.updateObstacle(obstacle);
-    await postFrame();
+    await postFrame(false);
     return;
   }
 
   if (msg.type === 'updateWindSpeed') {
     windSpeed = msg.windSpeed;
     solver.updateWindSpeed(windSpeed);
-    await postFrame();
+    await postFrame(false);
     return;
   }
 
   if (msg.type === 'updateFluidDensity') {
     fluidDensity = msg.fluidDensity;
     solver.updateFluidDensity(fluidDensity);
-    await postFrame();
+    await postFrame(false);
     return;
   }
 
   if (msg.type === 'paint') {
-    await postFrame();
+    await postFrame(false);
     return;
   }
 
@@ -135,6 +136,6 @@ self.onmessage = async (e: MessageEvent) => {
       solver.step();
     }
     if (gen !== generation) return;
-    await postFrame();
+    await postFrame(true);
   }
 };

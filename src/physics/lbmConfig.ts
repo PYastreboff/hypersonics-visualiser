@@ -81,10 +81,39 @@ export function liveSimTimeMsFromFrames(frames: number): number {
   return frames * LIVE_FRAME_MS;
 }
 
-/** True when simulation time is keeping up with wall clock (≈ one frame behind). */
+/** True when LBM live sim clock is keeping up with wall clock (≈ one frame behind). */
 export function isLiveSimRealTime(simMs: number, wallMs: number): boolean {
   if (simMs < LIVE_FRAME_MS) return false;
   return wallMs - simMs <= LIVE_FRAME_MS * 2;
+}
+
+/** Target wall-clock interval between completed LBM live frames (small tolerance for jitter). */
+export const LBM_REALTIME_MAX_FRAME_MS = LIVE_FRAME_MS * 1.35;
+
+export function pushLbmFrameInterval(
+  intervals: number[],
+  dt: number,
+  maxSamples = 8,
+): number[] {
+  if (dt <= 0 || dt >= 500) return intervals;
+  const next = intervals.concat(dt);
+  if (next.length > maxSamples) return next.slice(next.length - maxSamples);
+  return next;
+}
+
+/**
+ * True when recent completed LBM frames are arriving at ~30 ms wall-clock pace.
+ * Uses hysteresis on the on-pace ratio to avoid flicker without hiding sustained lag.
+ */
+export function isLbmLiveRealTimeFromIntervals(
+  intervals: number[],
+  wasRealTime = false,
+): boolean {
+  if (intervals.length < 3) return false;
+  const onPace = intervals.filter((dt) => dt <= LBM_REALTIME_MAX_FRAME_MS).length;
+  const ratio = onPace / intervals.length;
+  if (wasRealTime) return ratio >= 0.5;
+  return ratio >= 0.75;
 }
 
 export function formatPhysicalSimTime(seconds: number): string {

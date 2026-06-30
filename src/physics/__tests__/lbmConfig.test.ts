@@ -5,6 +5,8 @@ import {
   formatLiveSimTime,
   formatPhysicalSimTime,
   isLiveSimRealTime,
+  isLbmLiveRealTimeFromIntervals,
+  pushLbmFrameInterval,
   liveSimTimeMsFromFrames,
   lbmFrameToTime,
   lbmGridSize,
@@ -48,11 +50,29 @@ describe('lbm timing (gem.py)', () => {
     expect(liveSimTimeMsFromFrames(33)).toBe(990);
   });
 
-  it('detects real-time live simulation pace', () => {
+  it('detects real-time live simulation pace from wall lag', () => {
     expect(isLiveSimRealTime(0, 100)).toBe(false);
     expect(isLiveSimRealTime(30, 30)).toBe(true);
     expect(isLiveSimRealTime(300, 320)).toBe(true);
     expect(isLiveSimRealTime(300, 500)).toBe(false);
+  });
+
+  it('detects real-time from completed frame intervals', () => {
+    const onPace = [30, 31, 29, 32, 30];
+    const slow = [30, 31, 80, 90, 85];
+    expect(isLbmLiveRealTimeFromIntervals(onPace)).toBe(true);
+    expect(isLbmLiveRealTimeFromIntervals(slow)).toBe(false);
+    expect(isLbmLiveRealTimeFromIntervals(slow, true)).toBe(false);
+    expect(isLbmLiveRealTimeFromIntervals([30, 31, 55], true)).toBe(true);
+  });
+
+  it('tracks recent frame intervals', () => {
+    let intervals: number[] = [];
+    intervals = pushLbmFrameInterval(intervals, 30);
+    intervals = pushLbmFrameInterval(intervals, 31);
+    expect(intervals).toEqual([30, 31]);
+    intervals = pushLbmFrameInterval(intervals, 600);
+    expect(intervals).toEqual([30, 31]);
   });
 
   it('formats live sim time with real-time label', () => {

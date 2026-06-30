@@ -334,6 +334,45 @@ body,
   flex-wrap: wrap;
 }
 
+.lbm-title-primary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.75rem;
+  row-gap: 0.25rem;
+}
+
+.lbm-title-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.lbm-title-cd,
+.lbm-title-time {
+  display: inline-block;
+  min-width: 3.5ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, monospace;
+}
+
+.lbm-title-time {
+  min-width: 7ch;
+}
+
+.lbm-title-time-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.lbm-title-realtime {
+  color: var(--muted);
+  font-size: 0.92em;
+}
+
 .lbm-grid-label {
   color: var(--muted);
   font-size: 0.75rem;

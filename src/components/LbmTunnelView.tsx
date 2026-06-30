@@ -24,9 +24,10 @@ import {
   lbmPhysicsModeLabel,
   eulerRunModeLabel,
   eulerLiveStepsPerFrame,
-  formatLiveSimTime,
+  formatEulerElapsedMs,
   formatPhysicalSimTime,
-  isLiveSimRealTime,
+  isLbmLiveRealTimeFromIntervals,
+  pushLbmFrameInterval,
   liveSimTimeMsFromFrames,
   eulerFreestreamPressure,
   eulerFreestreamSpeed,
@@ -111,6 +112,7 @@ export function LbmTunnelView() {
     timeLabel: '',
   });
   const titleTimeRef = useRef<HTMLSpanElement>(null);
+  const titleRealTimeRef = useRef<HTMLSpanElement>(null);
   const titleCdRef = useRef<HTMLSpanElement>(null);
   const [prerenderBackend, setPrerenderBackend] = useState<'gpu' | 'cpu' | null>(null);
   const [eulerBackend, setEulerBackend] = useState<'gpu' | 'wasm' | 'cpu' | null>(null);
@@ -144,6 +146,9 @@ export function LbmTunnelView() {
   const liveSimMsRef = useRef(0);
   const liveSimTimeSRef = useRef(0);
   const liveDisplayTimeLabelRef = useRef('');
+  const liveDisplayRealTimeRef = useRef(false);
+  const lbmFrameIntervalsRef = useRef<number[]>([]);
+  const lbmLastFrameCompleteRef = useRef(0);
   const lastTunnelCdRef = useRef<number | null>(null);
   const hoverMaskRef = useRef<Uint8Array | null>(null);
   const metricRef = useRef<Float32Array | null>(null);
@@ -218,9 +223,13 @@ export function LbmTunnelView() {
     liveSimMsRef.current = 0;
     liveSimTimeSRef.current = 0;
     liveDisplayTimeLabelRef.current = '';
+    liveDisplayRealTimeRef.current = false;
+    lbmFrameIntervalsRef.current = [];
+    lbmLastFrameCompleteRef.current = 0;
     liveHudRef.current = { stepIndex: 0, progress: 0, timeLabel: '' };
     lastHudStoreSyncRef.current = 0;
     if (titleTimeRef.current) titleTimeRef.current.textContent = '';
+    if (titleRealTimeRef.current) titleRealTimeRef.current.hidden = true;
     if (titleCdRef.current) titleCdRef.current.textContent = '';
     setEulerTunnelState({ cd: null });
   }, [setEulerTunnelState]);
@@ -239,6 +248,10 @@ export function LbmTunnelView() {
     },
     [setEulerTunnelState, updateTitleCd],
   );
+
+  useEffect(() => {
+    updateTitleCd(lastTunnelCdRef.current);
+  }, [updateTitleCd]);
 
   const refreshLbmCdFromPrerender = useCallback(
     (frameIndex: number) => {
@@ -270,21 +283,34 @@ export function LbmTunnelView() {
     const state = useSimStore.getState();
     const isEulerLive = state.lbmPhysicsMode === 'euler' && state.eulerRunMode === 'live';
 
-    let timeLabel: string;
+    let timeValue: string;
+    let realTime = false;
     if (isEulerLive) {
-      timeLabel = formatPhysicalSimTime(liveSimTimeSRef.current);
+      timeValue = formatPhysicalSimTime(liveSimTimeSRef.current);
     } else {
-      const wallMs = liveWallMsRef.current;
       const displayMs = liveSimMsRef.current;
-      const realTime = isLiveSimRealTime(displayMs, wallMs);
-      timeLabel = formatLiveSimTime(Math.round(displayMs), realTime);
+      timeValue = formatEulerElapsedMs(Math.round(displayMs));
+      realTime = isLbmLiveRealTimeFromIntervals(
+        lbmFrameIntervalsRef.current,
+        liveDisplayRealTimeRef.current,
+      );
+    }
+    if (
+      timeValue === liveDisplayTimeLabelRef.current &&
+      realTime === liveDisplayRealTimeRef.current
+    ) {
+      return;
     }
 
-    if (timeLabel === liveDisplayTimeLabelRef.current) return;
-    liveDisplayTimeLabelRef.current = timeLabel;
-    liveHudRef.current.timeLabel = timeLabel;
+    liveDisplayTimeLabelRef.current = timeValue;
+    liveDisplayRealTimeRef.current = realTime;
+    liveHudRef.current.timeLabel = realTime ? `${timeValue} · real time` : timeValue;
+
     if (titleTimeRef.current) {
-      titleTimeRef.current.textContent = timeLabel;
+      titleTimeRef.current.textContent = timeValue;
+    }
+    if (titleRealTimeRef.current) {
+      titleRealTimeRef.current.hidden = !realTime;
     }
   }, []);
 
@@ -489,6 +515,21 @@ export function LbmTunnelView() {
           liveSimTimeSRef.current = msg.simTimeS;
           updateLiveTimeDisplay();
         }
+        syncLiveHudToStore();
+      } else if (state.lbmPhysicsMode === 'lbm' && state.lbmRunMode === 'live' && msg.didStep) {
+        const now = performance.now();
+        if (lbmLastFrameCompleteRef.current > 0) {
+          lbmFrameIntervalsRef.current = pushLbmFrameInterval(
+            lbmFrameIntervalsRef.current,
+            now - lbmLastFrameCompleteRef.current,
+          );
+        }
+        lbmLastFrameCompleteRef.current = now;
+
+        frameRef.current += 1;
+        liveSimMsRef.current = liveSimTimeMsFromFrames(frameRef.current);
+        liveHudRef.current.stepIndex = frameRef.current;
+        updateLiveTimeDisplay();
         syncLiveHudToStore();
       } else if (msg.tunnelCd !== undefined) {
         syncLiveHudToStore();
@@ -1391,12 +1432,6 @@ export function LbmTunnelView() {
           return;
         }
 
-        const nextFrame = frameRef.current + 1;
-        frameRef.current = nextFrame;
-        liveSimMsRef.current = liveSimTimeMsFromFrames(nextFrame);
-        liveHudRef.current.stepIndex = nextFrame;
-        updateLiveTimeDisplay();
-        syncLiveHudToStore();
         requestLiveStep({ renderStep });
         return;
       }
@@ -1817,28 +1852,34 @@ export function LbmTunnelView() {
   return (
     <div className="lbm-container">
       <div className="lbm-title-bar">
-        <span>
-          Flow Visualiser | {lbmPhysicsModeLabel(lbmPhysicsMode)} | {lbmDisplayModeLabel(lbmDisplayMode)}
-          {lbmPhysicsMode === 'euler' && ' · Inviscid Euler — educational'}
-          {' '}
-          | Cd{' '}
-          <span ref={titleCdRef} title="Drag coefficient from simulated surface pressure">
-            —
+        <div className="lbm-title-primary">
+          <span>
+            Flow Visualiser | {lbmPhysicsModeLabel(lbmPhysicsMode)} |{' '}
+            {lbmDisplayModeLabel(lbmDisplayMode)}
+            {lbmPhysicsMode === 'euler' && ' · Inviscid Euler — educational'}
+          </span>
+          <span className="lbm-title-metric" title="Drag coefficient from simulated surface pressure">
+            Cd <span ref={titleCdRef} className="lbm-title-cd" />
           </span>
           {((lbmPhysicsMode === 'lbm' && lbmRunMode === 'live') ||
             (lbmPhysicsMode === 'euler' && eulerRunMode === 'live')) && (
-            <>
-              {' '}
-              | Sim time: <span ref={titleTimeRef} />
-            </>
+            <span className="lbm-title-metric">
+              Sim time:{' '}
+              <span className="lbm-title-time-wrap">
+                <span ref={titleTimeRef} className="lbm-title-time" />
+                <span ref={titleRealTimeRef} className="lbm-title-realtime" hidden>
+                  {' '}
+                  · real time
+                </span>
+              </span>
+            </span>
           )}
           {lbmPhysicsMode === 'lbm' && lbmRunMode === 'prerender' && (
-            <>
-              {' '}
-              | Time: {lbmElapsedSec.toFixed(1)}s / {lbmPlaybackSeconds.toFixed(1)}s
-            </>
+            <span className="lbm-title-metric">
+              Time: {lbmElapsedSec.toFixed(1)}s / {lbmPlaybackSeconds.toFixed(1)}s
+            </span>
           )}
-        </span>
+        </div>
         <span className="lbm-grid-label">
           {nx} × {ny} grid · {lbmShapes.length} obstacle{lbmShapes.length === 1 ? '' : 's'}
           {lbmPhysicsMode === 'lbm' && <> · {lbmRunModeLabel(lbmRunMode)}</>}

@@ -10,6 +10,8 @@ export interface LiveFrameMessage {
   metric?: Float32Array;
   vmin: number;
   vmax: number;
+  /** LBM live: true when a physics step ran before this frame (not paint-only). */
+  didStep?: boolean;
   stepIndex?: number;
   converged?: boolean;
   progress?: number;

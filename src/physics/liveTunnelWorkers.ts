@@ -4,6 +4,14 @@ import { blitTunnelBitmap } from '@/visualization/tunnelRenderer';
 
 export type LiveWorkerKind = 'lbm' | 'euler';
 
+export interface LiveProbeMessage {
+  type: 'probe';
+  gx: number;
+  gy: number;
+  value?: number;
+  obstacle?: boolean;
+}
+
 export interface LiveFrameMessage {
   type: 'frame';
   bitmap: ImageBitmap;

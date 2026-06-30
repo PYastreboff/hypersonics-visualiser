@@ -115,6 +115,20 @@ self.onmessage = async (e: MessageEvent) => {
 
   if (gen !== generation || !sim || !obstacle) return;
 
+  if (msg.type === 'probe') {
+    const gx = msg.gx as number;
+    const gy = msg.gy as number;
+    if (gx < 0 || gx >= nx || gy < 0 || gy >= ny) return;
+    const idx = gx * ny + gy;
+    if (obstacle[idx]) {
+      self.postMessage({ type: 'probe', gx, gy, obstacle: true });
+      return;
+    }
+    const metric = getEulerTunnelMetric(sim.buildResult(), displayMode);
+    self.postMessage({ type: 'probe', gx, gy, value: metric[idx] });
+    return;
+  }
+
   if (msg.type === 'setDisplayMode') {
     displayMode = msg.displayMode;
     await postFrame();

@@ -48,12 +48,14 @@ import {
   createLiveWorker,
   terminateLiveWorker,
   type LiveFrameMessage,
+  type LiveProbeMessage,
   type LiveWorkerHandle,
 } from '@/physics/liveTunnelWorkers';
 import type { LbmDisplayMode, LbmPhysicsMode } from '@/types';
 import {
   fitDrawRect,
   renderTunnelFrame,
+  shouldTransferLiveMetric,
 } from '@/visualization/tunnelRenderer';
 import { LbmColorLegend } from './LbmColorLegend';
 
@@ -707,6 +709,41 @@ export function LbmTunnelView() {
   const syncHoverReadoutRef = useRef(syncHoverReadout);
   syncHoverReadoutRef.current = syncHoverReadout;
 
+  const applyHoverProbe = useCallback(
+    (msg: LiveProbeMessage) => {
+      const grid = hoverGridRef.current;
+      if (!grid || grid.gx !== msg.gx || grid.gy !== msg.gy) return;
+
+      const { lbmDisplayMode, lbmPhysicsMode } = useSimStore.getState();
+      const label = lbmDisplayModeLabel(lbmDisplayMode);
+
+      if (msg.obstacle) {
+        const obstacleText = `${label}: Obstacle`;
+        if (obstacleText === hoverReadoutCacheRef.current) return;
+        hoverReadoutCacheRef.current = obstacleText;
+        setHoverReadout(obstacleText);
+        return;
+      }
+
+      if (typeof msg.value !== 'number' || !Number.isFinite(msg.value)) return;
+
+      const next = `${label}: ${formatLbmLegendValue(lbmDisplayMode, msg.value, lbmPhysicsMode)} · (${msg.gx}, ${msg.gy})`;
+      if (next === hoverReadoutCacheRef.current) return;
+      hoverReadoutCacheRef.current = next;
+      setHoverReadout(next);
+    },
+    [],
+  );
+
+  const applyHoverProbeRef = useRef(applyHoverProbe);
+  applyHoverProbeRef.current = applyHoverProbe;
+
+  const requestHoverProbe = useCallback((gx: number, gy: number) => {
+    const worker = liveWorkerRef.current?.worker;
+    if (!worker) return;
+    worker.postMessage({ type: 'probe', gx, gy });
+  }, []);
+
   const updateHoverProbe = useCallback(
     (clientX: number, clientY: number) => {
       const surface = wrapRef.current;
@@ -721,9 +758,27 @@ export function LbmTunnelView() {
         return;
       }
       hoverGridRef.current = grid;
+
+      const obstacle = obstacleRef.current;
+      const idx = grid.gx * ny + grid.gy;
+      if (obstacle && idx >= 0 && idx < obstacle.length && obstacle[idx]) {
+        syncHoverReadout();
+        return;
+      }
+
+      const state = useSimStore.getState();
+      const isLive =
+        (state.lbmPhysicsMode === 'lbm' && state.lbmRunMode === 'live') ||
+        (state.lbmPhysicsMode === 'euler' && state.eulerRunMode === 'live');
+
+      if (isLive && !shouldTransferLiveMetric(nx, ny)) {
+        requestHoverProbe(grid.gx, grid.gy);
+        return;
+      }
+
       syncHoverReadout();
     },
-    [nx, ny, syncHoverReadout],
+    [nx, ny, requestHoverProbe, syncHoverReadout],
   );
 
   const clearHoverProbe = useCallback(() => {
@@ -889,6 +944,12 @@ export function LbmTunnelView() {
       worker.onmessage = (e: MessageEvent) => {
         const handle = liveWorkerRef.current;
         if (!handle || handle.generation !== generation) return;
+
+        if (e.data.type === 'probe') {
+          applyHoverProbeRef.current(e.data as LiveProbeMessage);
+          return;
+        }
+
         liveWorkerBusyRef.current = false;
 
         if (e.data.type === 'frame') {

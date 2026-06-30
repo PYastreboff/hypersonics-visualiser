@@ -27,7 +27,10 @@ import {
   formatPhysicalSimTime,
   isLiveSimRealTime,
   liveSimTimeMsFromFrames,
+  eulerFreestreamPressure,
+  eulerFreestreamSpeed,
 } from '@/physics/lbmConfig';
+import { temperatureAtAltitude } from '@/physics/atmosphere';
 import { formatDragCoefficient, computeDragFromEulerResult, computeLbmTunnelDrag } from '@/physics/tunnelDrag';
 import {
   getEulerTunnelMetric,
@@ -45,7 +48,7 @@ import {
   type LiveFrameMessage,
   type LiveWorkerHandle,
 } from '@/physics/liveTunnelWorkers';
-import type { LbmDisplayMode } from '@/types';
+import type { LbmDisplayMode, LbmPhysicsMode } from '@/types';
 import {
   fitDrawRect,
   renderTunnelFrame,
@@ -54,6 +57,36 @@ import { LbmColorLegend } from './LbmColorLegend';
 
 function lbmLatticeField(mode: LbmDisplayMode): 'velocity' | 'pressure' {
   return mode === 'pressure' ? 'pressure' : 'velocity';
+}
+
+function freestreamPreviewMetric(
+  nx: number,
+  ny: number,
+  displayMode: LbmDisplayMode,
+  physicsMode: LbmPhysicsMode,
+  windSpeed: number,
+  fluidDensity: number,
+  eulerMach: number,
+  eulerAltitude: number,
+): Float32Array {
+  const out = new Float32Array(nx * ny);
+  if (physicsMode === 'euler') {
+    const u0 = eulerFreestreamSpeed(eulerMach, eulerAltitude);
+    const p0 = eulerFreestreamPressure(eulerMach, eulerAltitude);
+    const t0 = temperatureAtAltitude(eulerAltitude);
+    const value =
+      displayMode === 'velocity'
+        ? u0
+        : displayMode === 'mach'
+          ? eulerMach
+          : displayMode === 'temperature'
+            ? t0
+            : p0;
+    out.fill(value);
+  } else {
+    out.fill(displayMode === 'pressure' ? fluidDensity / 3 : windSpeed);
+  }
+  return out;
 }
 
 const LIVE_HUD_STORE_MS = 400;
@@ -476,13 +509,16 @@ export function LbmTunnelView() {
     if (dragPaintRafRef.current) return;
     dragPaintRafRef.current = requestAnimationFrame(() => {
       dragPaintRafRef.current = 0;
-      const worker = liveWorkerRef.current;
-      if (worker && !liveWorkerBusyRef.current) {
-        liveWorkerBusyRef.current = true;
-        worker.worker.postMessage({ type: 'paint' });
-        return;
-      }
       paintCurrentRef.current();
+      const worker = liveWorkerRef.current;
+      if (!worker || liveWorkerBusyRef.current) return;
+      const { lbmPhysicsMode, eulerRunMode, lbmRunMode } = useSimStore.getState();
+      const isLive =
+        (lbmPhysicsMode === 'lbm' && lbmRunMode === 'live') ||
+        (lbmPhysicsMode === 'euler' && eulerRunMode === 'live');
+      if (!isLive) return;
+      liveWorkerBusyRef.current = true;
+      worker.worker.postMessage({ type: 'paint' });
     });
   }, []);
 
@@ -651,6 +687,46 @@ export function LbmTunnelView() {
   const paintMetricRef = useRef(paintMetric);
   paintMetricRef.current = paintMetric;
 
+  const paintImmediatePreview = useCallback(() => {
+    const obstacle = obstacleRef.current;
+    if (!obstacle) return;
+
+    const state = useSimStore.getState();
+    let metric = metricRef.current;
+    if (!metric || metric.length !== obstacle.length) {
+      if (state.lbmPhysicsMode === 'euler' && eulerResultRef.current) {
+        metric = getEulerTunnelMetric(eulerResultRef.current, state.lbmDisplayMode);
+      } else if (
+        state.lbmPhysicsMode === 'lbm' &&
+        state.lbmRunMode === 'prerender' &&
+        prerenderRef.current
+      ) {
+        metric = getPrerenderFrame(
+          prerenderRef.current,
+          frameRef.current,
+          lbmLatticeField(state.lbmDisplayMode),
+          state.lbmFluidDensity,
+          state.lbmWindSpeed,
+        );
+      } else {
+        metric = freestreamPreviewMetric(
+          nx,
+          ny,
+          state.lbmDisplayMode,
+          state.lbmPhysicsMode,
+          state.lbmWindSpeed,
+          state.lbmFluidDensity,
+          state.lbmEulerMach,
+          state.lbmEulerAltitude,
+        );
+      }
+    }
+    paintMetric(metric);
+  }, [nx, ny, paintMetric]);
+
+  const paintImmediatePreviewRef = useRef(paintImmediatePreview);
+  paintImmediatePreviewRef.current = paintImmediatePreview;
+
   const paintCurrent = useCallback(() => {
     const {
       lbmPhysicsMode,
@@ -739,24 +815,19 @@ export function LbmTunnelView() {
     }
 
     const worker = liveWorkerRef.current;
-    const { lbmPhysicsMode, eulerRunMode } = useSimStore.getState();
-    if (lbmPhysicsMode === 'euler' && eulerRunMode === 'live') {
+    const { lbmPhysicsMode, eulerRunMode, lbmRunMode } = useSimStore.getState();
+    const isLive =
+      (lbmPhysicsMode === 'euler' && eulerRunMode === 'live') ||
+      (lbmPhysicsMode === 'lbm' && lbmRunMode === 'live' && worker);
+    if (isLive) {
       if (dragRef.current) {
         obstacleDirtyRef.current = true;
       } else {
         postObstacleToLiveWorker(obstacle);
       }
-    } else if (worker && worker.kind === 'lbm') {
-      if (dragRef.current) {
-        obstacleDirtyRef.current = true;
-      } else if (!liveWorkerBusyRef.current) {
-        liveWorkerBusyRef.current = true;
-        const obstacleCopy = new Uint8Array(obstacle);
-        worker.worker.postMessage({ type: 'updateObstacle', obstacle: obstacleCopy.buffer }, [
-          obstacleCopy.buffer,
-        ]);
-      }
     }
+
+    paintImmediatePreviewRef.current();
 
     return obstacle;
   }, [nx, ny, lbmResolutionScale, postObstacleToLiveWorker]);
@@ -1405,6 +1476,7 @@ export function LbmTunnelView() {
       );
       rebuildObstacleVisual();
       updateHoverHighlight(drag.shapeId);
+      paintImmediatePreviewRef.current();
     },
     [
       lbmResolutionScale,

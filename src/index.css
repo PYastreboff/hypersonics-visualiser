@@ -721,25 +721,16 @@ select {
   cursor: pointer;
 }
 
-.lbm-slip-checkbox-row {
-  margin-top: 0.4rem;
-  margin-bottom: 0.15rem;
-  display: inline-flex !important;
-  width: fit-content;
+.lbm-slip-setting {
+  margin-top: 0.45rem;
+  margin-bottom: 0.4rem;
 }
 
-.lbm-slip-checkbox-info {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 0.95rem;
-  height: 0.95rem;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 0.68rem;
-  font-weight: 700;
-  line-height: 1;
+.lbm-slip-checkbox-row {
+  margin-top: 0.2rem;
+  margin-bottom: 0.2rem;
+  display: inline-flex !important;
+  width: fit-content;
 }
 
 .shape-grid {

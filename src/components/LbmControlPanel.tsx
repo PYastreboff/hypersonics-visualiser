@@ -173,21 +173,25 @@ function ShapeCard({
         />
       </div>
 
-      <label className="checkbox lbm-slip-checkbox-row">
-        <input
-          type="checkbox"
-          checked={!!shape.slipWall}
-          onChange={(e) => onChange({ ...shape, slipWall: e.target.checked })}
-        />
-        Slip wall (Euler)
-        <span
-          className="lbm-slip-checkbox-info"
-          title="Euler only: applies slip-wall reflection on this shape surface (normal velocity reflected, tangential velocity preserved)."
-          aria-label="Slip wall info"
-        >
-          i
+      <div className="setting-label lbm-slip-setting">
+        <span className="label-row">
+          <label className="checkbox lbm-slip-checkbox-row">
+            <input
+              type="checkbox"
+              checked={!!shape.slipWall}
+              onChange={(e) => onChange({ ...shape, slipWall: e.target.checked })}
+            />
+            <span>Slip wall (Euler)</span>
+          </label>
+          <span
+            className="tip-trigger"
+            data-tip="Euler only: treat this obstacle as an inviscid slip wall (normal velocity reflected, tangential preserved)."
+            aria-label="Slip wall (Euler) – Euler only: treat this obstacle as an inviscid slip wall (normal velocity reflected, tangential preserved)."
+          >
+            ?
+          </span>
         </span>
-      </label>
+      </div>
 
       {shape.type === 'airfoil' && (
         <div className="lbm-field-grid">

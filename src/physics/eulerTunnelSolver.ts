@@ -705,6 +705,7 @@ export class EulerTunnelSimulator {
       u[idx(0, y, ny)] = u0;
       v[idx(0, y, ny)] = 0;
       p[idx(0, y, ny)] = p0;
+      // Outlet: zero-gradient (simple transmissive-style outflow).
       rho[outId] = rho[inGhost];
       u[outId] = u[inGhost];
       v[outId] = v[inGhost];

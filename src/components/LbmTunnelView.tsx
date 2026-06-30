@@ -1085,8 +1085,9 @@ export function LbmTunnelView() {
     setPrerenderBackend(null);
 
     const runId = ++prerenderRunIdRef.current;
-    const obstacle = buildObstacle();
+    const { obstacle, obstacleSlip } = buildObstacle();
     obstacleRef.current = obstacle;
+    obstacleSlipRef.current = obstacleSlip;
     const obstacleCopy = new Uint8Array(obstacle);
 
     setLbmPrerenderState({ status: 'running', progress: 0 });
@@ -1526,7 +1527,7 @@ export function LbmTunnelView() {
     setIsDragging(false);
     commitLbmShapeLayout();
     if (obstacleDirtyRef.current && obstacleRef.current) {
-      postObstacleToLiveWorker(obstacleRef.current);
+      postObstacleToLiveWorker(obstacleRef.current, obstacleSlipRef.current);
     }
     if (drag.wasPlaying) {
       setLbmPlaying(true);

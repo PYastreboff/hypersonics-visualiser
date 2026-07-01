@@ -1666,9 +1666,6 @@ export function LbmTunnelView() {
       const points = strokeLogicalPoints(previousPoint, { lx, ly });
 
       if (isErasing) {
-        for (const point of points) {
-          applyLbmEraseBrush(point.lx, point.ly, lbmBrushRadius);
-        }
         drawRef.current = {
           mode: 'decrease',
           lastLx: lx,
@@ -1676,6 +1673,9 @@ export function LbmTunnelView() {
           wasPlaying,
         };
         setIsDrawing(true);
+        for (const point of points) {
+          applyLbmEraseBrush(point.lx, point.ly, lbmBrushRadius);
+        }
         rebuildObstacleVisual();
         return;
       }
@@ -1693,6 +1693,19 @@ export function LbmTunnelView() {
           .getState()
           .lbmShapes.filter((shape) => shape.customSource === 'drawn').length;
 
+        draw = {
+          mode: 'increase',
+          shapeId,
+          cx,
+          cy,
+          stencilKeys,
+          lastLx: lx,
+          lastLy: ly,
+          wasPlaying,
+        };
+        drawRef.current = draw;
+        setIsDrawing(true);
+
         addLbmShape({
           id: shapeId,
           type: 'custom',
@@ -1706,18 +1719,6 @@ export function LbmTunnelView() {
           ...stencilArraysFromKeys(stencilKeys),
         });
         setSelectedLbmShapeId(shapeId);
-        draw = {
-          mode: 'increase',
-          shapeId,
-          cx,
-          cy,
-          stencilKeys,
-          lastLx: lx,
-          lastLy: ly,
-          wasPlaying,
-        };
-        drawRef.current = draw;
-        setIsDrawing(true);
       } else {
         for (const point of points) {
           addBrushToStencilSet(draw.stencilKeys, draw.cx, draw.cy, point.lx, point.ly, lbmBrushRadius);

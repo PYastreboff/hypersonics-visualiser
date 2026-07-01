@@ -23,6 +23,17 @@ import type {
 } from '@/types';
 import { getShapeDefinition } from '@/shapes/definitions';
 import { computeAllMetrics } from '@/physics/drag';
+
+function isTunnelLiveMode(s: {
+  lbmPhysicsMode: LbmPhysicsMode;
+  lbmRunMode: LbmRunMode;
+  eulerRunMode: EulerRunMode;
+}): boolean {
+  return (
+    (s.lbmPhysicsMode === 'lbm' && s.lbmRunMode === 'live') ||
+    (s.lbmPhysicsMode === 'euler' && s.eulerRunMode === 'live')
+  );
+}
 import { defaultLbmShapes } from '@/physics/lbmObstacles';
 import {
   removeBrushFromStencilSet,
@@ -494,23 +505,38 @@ export const useSimStore = create<SimState>((set, get) => ({
   setSelectedLbmShapeId: (id) => set({ selectedLbmShapeId: id }),
   setHoveredLbmShapeId: (id) => set({ hoveredLbmShapeId: id }),
   addLbmShape: (shape) =>
-    set((s) => ({
-      lbmShapes: [...s.lbmShapes, shape],
-      lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
-      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
-      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
-    })),
+    set((s) => {
+      const live = isTunnelLiveMode(s);
+      return {
+        lbmShapes: [...s.lbmShapes, shape],
+        lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+        eulerTunnelStatus:
+          s.lbmPhysicsMode === 'euler' && !live ? 'idle' : s.eulerTunnelStatus,
+        eulerTunnelSeed:
+          s.lbmPhysicsMode === 'euler' && !live
+            ? s.eulerTunnelSeed + 1
+            : s.eulerTunnelSeed,
+      };
+    }),
   removeLbmShape: (id) =>
-    set((s) => ({
-      lbmShapes: s.lbmShapes.filter((sh) => sh.id !== id),
-      selectedLbmShapeId: s.selectedLbmShapeId === id ? null : s.selectedLbmShapeId,
-      hoveredLbmShapeId: s.hoveredLbmShapeId === id ? null : s.hoveredLbmShapeId,
-      lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
-      lbmPrerenderProgress: s.lbmRunMode === 'prerender' ? 0 : s.lbmPrerenderProgress,
-      lbmSeed: s.lbmPhysicsMode === 'lbm' ? s.lbmSeed + 1 : s.lbmSeed,
-      eulerTunnelStatus: s.lbmPhysicsMode === 'euler' ? 'idle' : s.eulerTunnelStatus,
-      eulerTunnelSeed: s.lbmPhysicsMode === 'euler' ? s.eulerTunnelSeed + 1 : s.eulerTunnelSeed,
-    })),
+    set((s) => {
+      const live = isTunnelLiveMode(s);
+      return {
+        lbmShapes: s.lbmShapes.filter((sh) => sh.id !== id),
+        selectedLbmShapeId: s.selectedLbmShapeId === id ? null : s.selectedLbmShapeId,
+        hoveredLbmShapeId: s.hoveredLbmShapeId === id ? null : s.hoveredLbmShapeId,
+        lbmPrerenderStatus: s.lbmRunMode === 'prerender' ? 'idle' : s.lbmPrerenderStatus,
+        lbmPrerenderProgress: s.lbmRunMode === 'prerender' ? 0 : s.lbmPrerenderProgress,
+        lbmSeed:
+          s.lbmPhysicsMode === 'lbm' && !live ? s.lbmSeed + 1 : s.lbmSeed,
+        eulerTunnelStatus:
+          s.lbmPhysicsMode === 'euler' && !live ? 'idle' : s.eulerTunnelStatus,
+        eulerTunnelSeed:
+          s.lbmPhysicsMode === 'euler' && !live
+            ? s.eulerTunnelSeed + 1
+            : s.eulerTunnelSeed,
+      };
+    }),
   setLbmRunMode: (mode) =>
     set({
       lbmRunMode: mode,

@@ -511,6 +511,10 @@ body,
   cursor: crosshair;
 }
 
+.lbm-canvas-erase {
+  cursor: cell;
+}
+
 .lbm-canvas-drawing {
   cursor: crosshair;
 }

@@ -43,7 +43,7 @@ export type EulerTunnelStatus = 'idle' | 'running' | 'ready' | 'error' | 'cancel
 
 export type LbmShapeType = 'airfoil' | 'square' | 'circle' | 'doubleWedge' | 'flatPlate' | 'custom';
 
-export type LbmInteractionMode = 'select' | 'draw';
+export type LbmInteractionMode = 'select' | 'draw' | 'erase';
 
 export type LbmDrawDensity = 'increase' | 'decrease';
 

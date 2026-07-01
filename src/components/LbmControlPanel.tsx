@@ -332,7 +332,6 @@ export function LbmControlPanel() {
     eulerWallMode,
     lbmInteractionMode,
     lbmBrushRadius,
-    lbmDrawDensity,
     lbmShowTunnelDims,
     selectedLbmShapeId,
     hoveredLbmShapeId,
@@ -363,7 +362,6 @@ export function LbmControlPanel() {
     setHoveredLbmShapeId,
     setLbmInteractionMode,
     setLbmBrushRadius,
-    setLbmDrawDensity,
     toggleLbmShowTunnelDims,
     setSelectedLbmShapeId,
   } = useSimStore();
@@ -771,7 +769,7 @@ export function LbmControlPanel() {
 
         <SettingLabel
           label="Canvas tool"
-          tip="Move existing obstacles, or draw new ones directly on the flow field"
+          tip="Move obstacles, paint new ones, or erase painted cells"
         >
           <div className="mode-toggle">
             <button
@@ -788,65 +786,55 @@ export function LbmControlPanel() {
             >
               Draw
             </button>
+            <button
+              type="button"
+              className={lbmInteractionMode === 'erase' ? 'active' : ''}
+              onClick={() => setLbmInteractionMode('erase')}
+            >
+              Eraser
+            </button>
           </div>
         </SettingLabel>
 
-        {lbmInteractionMode === 'draw' && (
-          <>
-            <SettingLabel
-              label="Density"
-              tip="Increase adds obstacle cells; decrease erases them"
-            >
-              <div className="mode-toggle">
-                <button
-                  type="button"
-                  className={lbmDrawDensity === 'increase' ? 'active' : ''}
-                  onClick={() => setLbmDrawDensity('increase')}
-                >
-                  Increase
-                </button>
-                <button
-                  type="button"
-                  className={lbmDrawDensity === 'decrease' ? 'active' : ''}
-                  onClick={() => setLbmDrawDensity('decrease')}
-                >
-                  Decrease
-                </button>
-              </div>
-            </SettingLabel>
-
-            <SettingLabel label="Brush size" tip="Radius of the brush in grid cells">
-              <div className="lbm-brush-size">
-                <button
-                  type="button"
-                  className="shape-btn lbm-brush-step"
-                  onClick={() => setLbmBrushRadius(lbmBrushRadius - 1)}
-                  disabled={lbmBrushRadius <= 1}
-                  aria-label="Decrease brush size"
-                >
-                  −
-                </button>
-                <input
-                  type="range"
-                  min={1}
-                  max={8}
-                  step={1}
-                  value={lbmBrushRadius}
-                  onChange={(e) => setLbmBrushRadius(parseInt(e.target.value, 10))}
-                />
-                <button
-                  type="button"
-                  className="shape-btn lbm-brush-step"
-                  onClick={() => setLbmBrushRadius(lbmBrushRadius + 1)}
-                  disabled={lbmBrushRadius >= 8}
-                  aria-label="Increase brush size"
-                >
-                  +
-                </button>
-                <span className="value">{lbmBrushRadius} cells</span>
-              </div>
-            </SettingLabel>
-          </>
+        {(lbmInteractionMode === 'draw' || lbmInteractionMode === 'erase') && (
+          <SettingLabel
+            label="Brush size"
+            tip={
+              lbmInteractionMode === 'erase'
+                ? 'Radius of the eraser in grid cells (painted obstacles only)'
+                : 'Radius of the brush in grid cells'
+            }
+          >
+            <div className="lbm-brush-size">
+              <button
+                type="button"
+                className="shape-btn lbm-brush-step"
+                onClick={() => setLbmBrushRadius(lbmBrushRadius - 1)}
+                disabled={lbmBrushRadius <= 1}
+                aria-label="Decrease brush size"
+              >
+                −
+              </button>
+              <input
+                type="range"
+                min={1}
+                max={8}
+                step={1}
+                value={lbmBrushRadius}
+                onChange={(e) => setLbmBrushRadius(parseInt(e.target.value, 10))}
+              />
+              <button
+                type="button"
+                className="shape-btn lbm-brush-step"
+                onClick={() => setLbmBrushRadius(lbmBrushRadius + 1)}
+                disabled={lbmBrushRadius >= 8}
+                aria-label="Increase brush size"
+              >
+                +
+              </button>
+              <span className="value">{lbmBrushRadius} cells</span>
+            </div>
+          </SettingLabel>
         )}
 
         {lbmShapes.map((shape, index) => (

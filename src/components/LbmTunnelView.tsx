@@ -51,7 +51,7 @@ import {
   type LiveProbeMessage,
   type LiveWorkerHandle,
 } from '@/physics/liveTunnelWorkers';
-import type { LbmDisplayMode, LbmPhysicsMode } from '@/types';
+import type { LbmDisplayMode, LbmInteractionMode, LbmPhysicsMode } from '@/types';
 import {
   fitDrawRect,
   renderTunnelFrame,
@@ -94,6 +94,10 @@ function freestreamPreviewMetric(
 }
 
 const LIVE_HUD_STORE_MS = 400;
+
+function isBrushToolMode(mode: LbmInteractionMode): boolean {
+  return mode === 'draw' || mode === 'erase';
+}
 
 export function LbmTunnelView() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -193,7 +197,6 @@ export function LbmTunnelView() {
     setHoveredLbmShapeId,
     lbmInteractionMode,
     lbmBrushRadius,
-    lbmDrawDensity,
     lbmShowTunnelDims,
     addLbmShape,
     updateLbmShapeStencil,
@@ -927,7 +930,7 @@ export function LbmTunnelView() {
       (lbmPhysicsMode === 'euler' && eulerRunMode === 'live') ||
       (lbmPhysicsMode === 'lbm' && lbmRunMode === 'live' && worker);
     if (isLive) {
-      if (dragRef.current) {
+      if (dragRef.current || drawRef.current) {
         obstacleDirtyRef.current = true;
       } else {
         postObstacleToLiveWorker(obstacle, obstacleSlip);
@@ -1416,10 +1419,6 @@ export function LbmTunnelView() {
   }, [lbmPhysicsMode, lbmRewind, lbmRunMode, lbmPrerenderStatus, paintCurrent, setLbmFrameIndex]);
 
   useEffect(() => {
-    interactionBusyRef.current = isDrawing;
-  }, [isDrawing]);
-
-  useEffect(() => {
     const canvas = canvasRef.current;
     const parent = wrapRef.current;
     if (!canvas || !parent) return;
@@ -1555,7 +1554,7 @@ export function LbmTunnelView() {
   const updateBrushPreview = useCallback(
     (clientX: number, clientY: number) => {
       const surface = wrapRef.current;
-      if (!surface || useSimStore.getState().lbmInteractionMode !== 'draw') {
+      if (!surface || !isBrushToolMode(useSimStore.getState().lbmInteractionMode)) {
         setBrushPreview(null);
         return;
       }
@@ -1577,7 +1576,7 @@ export function LbmTunnelView() {
   );
 
   useEffect(() => {
-    if (lbmInteractionMode !== 'draw') {
+    if (!isBrushToolMode(lbmInteractionMode)) {
       setBrushPreview(null);
     }
   }, [lbmInteractionMode]);
@@ -1637,9 +1636,8 @@ export function LbmTunnelView() {
       const { stencilX, stencilY } = stencilArraysFromKeys(draw.stencilKeys);
       updateLbmShapeStencil(draw.shapeId, stencilX, stencilY);
       rebuildObstacleVisual();
-      paintCurrent();
     },
-    [paintCurrent, rebuildObstacleVisual, updateLbmShapeStencil],
+    [rebuildObstacleVisual, updateLbmShapeStencil],
   );
 
   const applyDrawAt = useCallback(
@@ -1655,7 +1653,8 @@ export function LbmTunnelView() {
       const ly = grid.gy / lbmResolutionScale;
       const wasPlaying = useSimStore.getState().lbmPlaying;
       const runMode = useSimStore.getState().lbmRunMode;
-      const density = useSimStore.getState().lbmDrawDensity;
+      const interactionMode = useSimStore.getState().lbmInteractionMode;
+      const isErasing = interactionMode === 'erase';
       if (runMode !== 'live') {
         setLbmPlaying(false);
       }
@@ -1666,7 +1665,7 @@ export function LbmTunnelView() {
           : { lx: drawRef.current.lastLx, ly: drawRef.current.lastLy };
       const points = strokeLogicalPoints(previousPoint, { lx, ly });
 
-      if (density === 'decrease') {
+      if (isErasing) {
         for (const point of points) {
           applyLbmEraseBrush(point.lx, point.ly, lbmBrushRadius);
         }
@@ -1678,7 +1677,6 @@ export function LbmTunnelView() {
         };
         setIsDrawing(true);
         rebuildObstacleVisual();
-        paintCurrent();
         return;
       }
 
@@ -1741,7 +1739,6 @@ export function LbmTunnelView() {
       setSelectedLbmShapeId,
       syncDrawStroke,
       rebuildObstacleVisual,
-      paintCurrent,
     ],
   );
 
@@ -1752,10 +1749,14 @@ export function LbmTunnelView() {
     drawRef.current = null;
     setIsDrawing(false);
     commitLbmShapeLayout();
+    if (obstacleDirtyRef.current && obstacleRef.current) {
+      postObstacleToLiveWorker(obstacleRef.current, obstacleSlipRef.current);
+      obstacleDirtyRef.current = false;
+    }
     if (draw.wasPlaying) {
       setLbmPlaying(true);
     }
-  }, [commitLbmShapeLayout, setLbmPlaying]);
+  }, [commitLbmShapeLayout, postObstacleToLiveWorker, setLbmPlaying]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1766,7 +1767,7 @@ export function LbmTunnelView() {
       const grid = screenToGrid(e.clientX, e.clientY, surface, nx, ny, fitDrawRect);
       if (!grid) return;
 
-      if (useSimStore.getState().lbmInteractionMode === 'draw') {
+      if (isBrushToolMode(useSimStore.getState().lbmInteractionMode)) {
         e.preventDefault();
         canvas.setPointerCapture(e.pointerId);
         updateBrushPreview(e.clientX, e.clientY);
@@ -1813,18 +1814,12 @@ export function LbmTunnelView() {
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (useSimStore.getState().lbmInteractionMode === 'draw') {
+      if (isBrushToolMode(useSimStore.getState().lbmInteractionMode)) {
         updateBrushPreview(e.clientX, e.clientY);
         updateHoverProbe(e.clientX, e.clientY);
         if (drawRef.current) {
           applyDrawAt(e.clientX, e.clientY, false);
         }
-        return;
-      }
-
-      if (drawRef.current) {
-        updateHoverProbe(e.clientX, e.clientY);
-        applyDrawAt(e.clientX, e.clientY, false);
         return;
       }
 
@@ -2034,9 +2029,11 @@ export function LbmTunnelView() {
             showSolverPlaceholder ? 'lbm-canvas-hidden' : '',
             isDrawing
               ? 'lbm-canvas-drawing'
-              : lbmInteractionMode === 'draw'
-                ? 'lbm-canvas-draw'
-                : isDragging
+              : lbmInteractionMode === 'erase'
+                ? 'lbm-canvas-erase'
+                : lbmInteractionMode === 'draw'
+                  ? 'lbm-canvas-draw'
+                  : isDragging
                   ? 'lbm-canvas-dragging'
                   : canvasHoverShapeId
                     ? 'lbm-canvas-grab'
@@ -2045,11 +2042,11 @@ export function LbmTunnelView() {
             .filter(Boolean)
             .join(' ')}
         />
-        {brushPreview && !showSolverPlaceholder && lbmInteractionMode === 'draw' && (
+        {brushPreview && !showSolverPlaceholder && isBrushToolMode(lbmInteractionMode) && (
           <div className="lbm-brush-overlay" aria-hidden>
             <div
               className={
-                lbmDrawDensity === 'decrease'
+                lbmInteractionMode === 'erase'
                   ? 'lbm-brush-circle erase'
                   : 'lbm-brush-circle'
               }
@@ -2107,11 +2104,11 @@ export function LbmTunnelView() {
       )}
       {!showSolverPlaceholder && (
         <p className="lbm-drag-hint">
-          {lbmInteractionMode === 'draw'
-            ? lbmDrawDensity === 'decrease'
-              ? 'Drag on the canvas to erase painted obstacles'
-              : 'Click and drag on the canvas to paint obstacles'
-            : 'Click and drag shapes to move them'}
+          {lbmInteractionMode === 'erase'
+            ? 'Drag on the canvas to erase painted obstacles'
+            : lbmInteractionMode === 'draw'
+              ? 'Click and drag on the canvas to paint obstacles'
+              : 'Click and drag shapes to move them'}
         </p>
       )}
     </div>

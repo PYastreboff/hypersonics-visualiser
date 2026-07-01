@@ -956,8 +956,9 @@ export function LbmTunnelView() {
           applyLiveFrame(e.data as LiveFrameMessage);
         }
       };
-      worker.onerror = () => {
+      worker.onerror = (err) => {
         liveWorkerBusyRef.current = false;
+        console.error('Live simulation worker failed:', err);
       };
       liveWorkerRef.current = { kind, worker, busy: false, generation };
     },

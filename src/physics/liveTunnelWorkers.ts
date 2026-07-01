@@ -1,6 +1,8 @@
 import type { LbmDisplayMode } from '@/types';
 import type { EulerTunnelResult } from '@/physics/eulerTunnelSolver';
 import { blitTunnelBitmap } from '@/visualization/tunnelRenderer';
+import LbmLiveWorker from '../workers/lbmLive.worker.ts?worker';
+import EulerTunnelLiveWorker from '../workers/eulerTunnelLive.worker.ts?worker';
 
 export type LiveWorkerKind = 'lbm' | 'euler';
 
@@ -37,11 +39,8 @@ export interface LiveWorkerHandle {
 }
 
 export function createLiveWorker(kind: LiveWorkerKind): Worker {
-  const url =
-    kind === 'lbm'
-      ? new URL('../workers/lbmLive.worker.ts', import.meta.url)
-      : new URL('../workers/eulerTunnelLive.worker.ts', import.meta.url);
-  return new Worker(url, { type: 'module' });
+  const WorkerCtor = kind === 'lbm' ? LbmLiveWorker : EulerTunnelLiveWorker;
+  return new WorkerCtor();
 }
 
 export function terminateLiveWorker(handle: LiveWorkerHandle | null): void {
